@@ -12,7 +12,7 @@ Deterministic State Machines: The imaging loop must be a strictly verified state
 Zero-Copy Processing: File carving and signature scanning should operate on memory-mapped slices of the image file to minimize RAM overhead and maximize throughput.
 Verification-First: Extracted files aren't just saved; they are validated. Carved media files are passed through tpt-media parsers to ensure they are structurally sound, not just false-positive header matches.
 3. Subsystem Breakdown
-3.1. Subsystem A: rescue-imager (Physical Recovery)
+3.1. Subsystem A: tpt-usb-rescue-imager (Physical Recovery)
 This subsystem handles the raw block device. It is conceptually similar to ddrescue but built in Rust with strict memory safety.
 The Mapfile: A persistent binary or TOML file that tracks the state of every block on the drive (e.g., + for recovered, - for bad/unreadable, ? for untested).
 Multi-Pass Algorithm:
@@ -20,12 +20,12 @@ Pass 1 (Sequential Sweep): Reads large chunks (e.g., 1MB). On I/O error, marks t
 Pass 2 (Sector Retries): Re-reads the bad chunks in smaller increments (e.g., 4KB, then 512 bytes) to squeeze out remaining data.
 Pass 3 (Trimming): Retries the edges of bad blocks to find the exact sector boundary where the failure starts.
 Sparse File Output: Writes the output image as a sparse file to save disk space, filling unrecoverable bad sectors with zeroes to maintain byte-alignment.
-3.2. Subsystem B: rescue-carver (Logical Recovery)
+3.2. Subsystem B: tpt-usb-rescue-carver (Logical Recovery)
 This subsystem operates on the generated .img file, ignoring filesystem structures entirely.
 Signature Database: A compiled-in database of file headers (magic numbers) and footers (e.g., JPEG FF D8 to FF D9).
 Zero-Copy Scanner: Uses memmap2 to map the image file into memory and uses SIMD-optimized byte scanning (via tpt-math or standard Rust slices) to find headers.
 tpt-media Integration (The Killer Feature): When a potential file is carved out, it is passed to the tpt-media codec parsers. If tpt-media rejects the file as structurally invalid (e.g., a JPEG header was found, but the Huffman tables are garbage), the carver discards it or flags it as "corrupted" rather than saving a broken file.
-3.3. Subsystem C: rescue-fs (Filesystem Parser)
+3.3. Subsystem C: tpt-usb-rescue-fs (Filesystem Parser)
 For drives where the NAND is fine but the partition table/FAT is corrupted.
 Parses raw FAT32, exFAT, and NTFS structures directly from the byte slice.
 Rebuilds the directory tree in memory and extracts files based on cluster chains, bypassing the OS's "Drive needs formatting" error.
