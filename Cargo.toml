@@ -2,9 +2,9 @@
 resolver = "3"
 members = [
     "crates/tpt-usb-rescue-hal",
-    "crates/rescue-imager",
-    "crates/rescue-carver",
-    "crates/rescue-fs",
+    "crates/tpt-usb-rescue-imager",
+    "crates/tpt-usb-rescue-carver",
+    "crates/tpt-usb-rescue-fs",
     "crates/tpt-usb-rescue",
 ]
 
@@ -21,13 +21,17 @@ categories = ["command-line-utilities", "filesystem"]
 
 [workspace.dependencies]
 tpt-usb-rescue-hal = { path = "crates/tpt-usb-rescue-hal", version = "0.1.0" }
-rescue-imager = { path = "crates/rescue-imager", version = "0.1.0" }
-rescue-carver = { path = "crates/rescue-carver", version = "0.1.0" }
-rescue-fs = { path = "crates/rescue-fs", version = "0.1.0" }
+tpt-usb-rescue-imager = { path = "crates/tpt-usb-rescue-imager", version = "0.1.0" }
+tpt-usb-rescue-carver = { path = "crates/tpt-usb-rescue-carver", version = "0.1.0" }
+tpt-usb-rescue-fs = { path = "crates/tpt-usb-rescue-fs", version = "0.1.0" }
 clap = { version = "4", features = ["derive"] }
 thiserror = "2"
 memmap2 = "0.9"
 blake3 = "1"
+libc = "0.2"
+crc32fast = "1"
+sha2 = "0.10"
+proptest = "1"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

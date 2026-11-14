@@ -7,15 +7,20 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-keywords.workspace = true
-categories.workspace = true
+readme = "README.md"
+keywords = ["forensics", "data-recovery", "usb", "ddrescue", "carving"]
+categories = ["command-line-utilities", "filesystem"]
 
 [lints]
 workspace = true
 
 [dependencies]
 clap.workspace = true
+memmap2.workspace = true
 tpt-usb-rescue-hal.workspace = true
-rescue-imager.workspace = true
-rescue-carver.workspace = true
-rescue-fs.workspace = true
+tpt-usb-rescue-imager.workspace = true
+tpt-usb-rescue-carver.workspace = true
+tpt-usb-rescue-fs.workspace = true
+
+[dev-dependencies]
+crc32fast.workspace = true

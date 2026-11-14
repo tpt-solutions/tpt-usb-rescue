@@ -1,5 +1,5 @@
 [package]
-name = "rescue-carver"
+name = "tpt-usb-rescue-carver"
 description = "Zero-copy signature carver with media validation for tpt-usb-rescue"
 version.workspace = true
 edition.workspace = true
@@ -7,6 +7,9 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+readme = "README.md"
+keywords = ["file-carving", "forensics", "data-recovery", "signatures", "jpeg"]
+categories = ["filesystem", "parser-implementations"]
 
 [lints]
 workspace = true
@@ -14,3 +17,9 @@ workspace = true
 [dependencies]
 thiserror.workspace = true
 memmap2.workspace = true
+blake3.workspace = true
+sha2.workspace = true
+crc32fast.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

@@ -1,5 +1,5 @@
 [package]
-name = "rescue-fs"
+name = "tpt-usb-rescue-fs"
 description = "FAT32/exFAT/NTFS raw parsers for tpt-usb-rescue"
 version.workspace = true
 edition.workspace = true
@@ -7,9 +7,15 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+readme = "README.md"
+keywords = ["fat32", "exfat", "filesystem", "forensics", "parser"]
+categories = ["filesystem", "parser-implementations"]
 
 [lints]
 workspace = true
 
 [dependencies]
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

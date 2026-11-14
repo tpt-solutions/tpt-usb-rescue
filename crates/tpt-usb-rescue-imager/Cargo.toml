@@ -1,5 +1,5 @@
 [package]
-name = "rescue-imager"
+name = "tpt-usb-rescue-imager"
 description = "Multi-pass forensic imager with crash-safe mapfile for tpt-usb-rescue"
 version.workspace = true
 edition.workspace = true
@@ -7,10 +7,17 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+readme = "README.md"
+keywords = ["forensics", "ddrescue", "disk-imaging", "data-recovery", "mapfile"]
+categories = ["filesystem"]
 
 [lints]
 workspace = true
 
 [dependencies]
 thiserror.workspace = true
+crc32fast.workspace = true
 tpt-usb-rescue-hal.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
