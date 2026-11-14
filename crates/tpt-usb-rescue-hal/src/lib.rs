@@ -11,6 +11,8 @@ pub mod safety;
 
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(windows)]
 mod windows;
 
@@ -125,6 +127,15 @@ pub fn open_device(path: &Path) -> Result<FileDevice, HalError> {
             direct: true,
         })
     }
+    #[cfg(target_os = "macos")]
+    {
+        let (file, geometry) = macos::open_direct(path)?;
+        Ok(FileDevice {
+            file,
+            geometry,
+            direct: true,
+        })
+    }
     #[cfg(windows)]
     {
         let (file, geometry) = windows::open_direct(path)?;
@@ -134,7 +145,7 @@ pub fn open_device(path: &Path) -> Result<FileDevice, HalError> {
             direct: true,
         })
     }
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = path;
         Err(HalError::Unsupported)

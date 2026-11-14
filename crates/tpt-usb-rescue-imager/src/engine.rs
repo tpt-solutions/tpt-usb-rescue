@@ -9,11 +9,18 @@
 //! Every state change is checkpointed: image data is synced before the mapfile records it as
 //! recovered, so a kill at any point leaves a map that never claims data that is not on disk.
 //! Device removal stops the run cleanly with the progress saved.
+//!
+//! Reads run on a reader thread. A read that does not finish within
+//! [`EngineConfig::read_timeout`] is treated as a media failure, and the reader is replaced, so a
+//! hung device cannot stall the whole run. The stuck thread is left to finish on its own.
 
 use crate::BlockStatus;
 use crate::mapfile::{Mapfile, MapfileError, Totals};
 use crate::output::OutputImage;
 use std::io;
+use std::sync::Arc;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::time::Duration;
 use tpt_usb_rescue_hal::{AlignedBuf, DeviceGeometry, HalError, RawDevice};
 
 /// Windows and Linux error codes meaning the device has gone away.
@@ -63,6 +70,8 @@ pub struct EngineConfig {
     pub pass2_retries: u32,
     /// Extra attempts per edge sector in pass 3 (default 4).
     pub trim_retries: u32,
+    /// A read that does not complete in this time counts as a media failure (default 5 s).
+    pub read_timeout: Duration,
 }
 
 impl Default for EngineConfig {
@@ -71,6 +80,7 @@ impl Default for EngineConfig {
             chunk_bytes: 1 << 20,
             pass2_retries: 2,
             trim_retries: 4,
+            read_timeout: Duration::from_secs(5),
         }
     }
 }
@@ -90,22 +100,82 @@ pub enum EngineError {
 }
 
 enum Read {
-    Ok { bytes: usize },
+    Ok { buf: AlignedBuf, bytes: usize },
     Media,
 }
 
-pub struct Engine<'a, D: RawDevice> {
-    dev: &'a D,
+/// Callback invoked with the current totals after each checkpoint.
+pub type ProgressHook = Box<dyn FnMut(&Totals)>;
+
+struct ReadRequest {
+    offset: u64,
+    len: usize,
+    align: usize,
+}
+
+type ReadResponse = Result<(AlignedBuf, usize), HalError>;
+
+/// A thread that performs device reads on request, so the caller can time them out.
+struct Reader {
+    requests: mpsc::Sender<ReadRequest>,
+    responses: mpsc::Receiver<ReadResponse>,
+}
+
+enum ReaderOutcome {
+    Done(ReadResponse),
+    TimedOut,
+    Stopped,
+}
+
+impl Reader {
+    fn spawn<D: RawDevice + Send + Sync + 'static>(dev: Arc<D>) -> Self {
+        let (req_tx, req_rx) = mpsc::channel::<ReadRequest>();
+        let (resp_tx, resp_rx) = mpsc::channel::<ReadResponse>();
+        std::thread::spawn(move || {
+            for req in req_rx {
+                let response = fetch(dev.as_ref(), &req);
+                if resp_tx.send(response).is_err() {
+                    break; // the engine gave up on this reader
+                }
+            }
+        });
+        Reader {
+            requests: req_tx,
+            responses: resp_rx,
+        }
+    }
+
+    fn read(&self, req: ReadRequest, timeout: Duration) -> ReaderOutcome {
+        if self.requests.send(req).is_err() {
+            return ReaderOutcome::Stopped;
+        }
+        match self.responses.recv_timeout(timeout) {
+            Ok(resp) => ReaderOutcome::Done(resp),
+            Err(RecvTimeoutError::Timeout) => ReaderOutcome::TimedOut,
+            Err(RecvTimeoutError::Disconnected) => ReaderOutcome::Stopped,
+        }
+    }
+}
+
+fn fetch<D: RawDevice>(dev: &D, req: &ReadRequest) -> ReadResponse {
+    let mut buf = AlignedBuf::new(req.len, req.align)?;
+    let n = dev.read_at(req.offset, &mut buf[..req.len])?;
+    Ok((buf, n))
+}
+
+pub struct Engine<D: RawDevice + Send + Sync + 'static> {
+    dev: Arc<D>,
+    reader: Reader,
     geo: DeviceGeometry,
     map: Mapfile,
     out: OutputImage,
-    buf: AlignedBuf,
     cfg: EngineConfig,
+    progress: Option<ProgressHook>,
 }
 
-impl<'a, D: RawDevice> Engine<'a, D> {
+impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
     pub fn new(
-        dev: &'a D,
+        dev: Arc<D>,
         map: Mapfile,
         out: OutputImage,
         cfg: EngineConfig,
@@ -126,17 +196,15 @@ impl<'a, D: RawDevice> Engine<'a, D> {
                 )),
             });
         }
-        let align = (geo.sector_size as usize).max(4096);
-        let sector = u64::from(geo.sector_size);
-        let len = (cfg.chunk_bytes.max(sector) / sector * sector).max(sector) as usize;
-        let buf = AlignedBuf::new(len.max(align), align)?;
+        let reader = Reader::spawn(Arc::clone(&dev));
         Ok(Self {
             dev,
+            reader,
             geo,
             map,
             out,
-            buf,
             cfg,
+            progress: None,
         })
     }
 
@@ -170,7 +238,15 @@ impl<'a, D: RawDevice> Engine<'a, D> {
     pub fn checkpoint(&mut self) -> Result<(), EngineError> {
         self.out.sync().map_err(EngineError::Output)?;
         self.map.sync()?;
+        if let Some(hook) = self.progress.as_mut() {
+            hook(&self.map.totals());
+        }
         Ok(())
+    }
+
+    /// Registers a callback invoked after every checkpoint with the current totals.
+    pub fn set_progress_hook(&mut self, hook: ProgressHook) {
+        self.progress = Some(hook);
     }
 
     /// Finalises the image length and syncs everything. Consumes the engine.
@@ -189,7 +265,7 @@ impl<'a, D: RawDevice> Engine<'a, D> {
             while s < end {
                 let n = chunk.min(end - s);
                 match self.read_block(s, n, 0)? {
-                    Read::Ok { bytes } => self.commit(s, bytes, n)?,
+                    Read::Ok { buf, bytes } => self.commit(s, &buf, bytes, n)?,
                     Read::Media => self.map.set(s, n, BlockStatus::NonTrimmed)?,
                 }
                 self.checkpoint()?;
@@ -209,11 +285,11 @@ impl<'a, D: RawDevice> Engine<'a, D> {
             while s < end {
                 let n = big.min(end - s);
                 match self.read_block(s, n, self.cfg.pass2_retries)? {
-                    Read::Ok { bytes } => self.commit(s, bytes, n)?,
+                    Read::Ok { buf, bytes } => self.commit(s, &buf, bytes, n)?,
                     Read::Media if n > 1 => {
                         for sector in s..s + n {
                             match self.read_block(sector, 1, self.cfg.pass2_retries)? {
-                                Read::Ok { bytes } => self.commit(sector, bytes, 1)?,
+                                Read::Ok { buf, bytes } => self.commit(sector, &buf, bytes, 1)?,
                                 Read::Media => self.map.set(sector, 1, BlockStatus::BadSector)?,
                             }
                             self.checkpoint()?;
@@ -237,7 +313,7 @@ impl<'a, D: RawDevice> Engine<'a, D> {
             // Trim from the front until the first sector that stays unreadable.
             while lo < hi {
                 match self.read_block(lo, 1, self.cfg.trim_retries)? {
-                    Read::Ok { bytes } => self.commit(lo, bytes, 1)?,
+                    Read::Ok { buf, bytes } => self.commit(lo, &buf, bytes, 1)?,
                     Read::Media => break,
                 }
                 self.checkpoint()?;
@@ -246,7 +322,7 @@ impl<'a, D: RawDevice> Engine<'a, D> {
             // Trim from the back the same way.
             while hi > lo {
                 match self.read_block(hi - 1, 1, self.cfg.trim_retries)? {
-                    Read::Ok { bytes } => self.commit(hi - 1, bytes, 1)?,
+                    Read::Ok { buf, bytes } => self.commit(hi - 1, &buf, bytes, 1)?,
                     Read::Media => break,
                 }
                 self.checkpoint()?;
@@ -256,42 +332,64 @@ impl<'a, D: RawDevice> Engine<'a, D> {
         Ok(())
     }
 
-    /// Reads `n` sectors at `start` into the working buffer, retrying media faults.
+    /// Reads `n` sectors at `start`, retrying media faults and timeouts.
     fn read_block(&mut self, start: u64, n: u64, retries: u32) -> Result<Read, EngineError> {
         let ss = u64::from(self.geo.sector_size);
-        let offset = start * ss;
-        let want = (n * ss) as usize;
+        let align = (self.geo.sector_size as usize).max(4096);
         let mut attempt = 0;
         loop {
-            match self.dev.read_at(offset, &mut self.buf[..want]) {
-                Ok(0) => return Ok(Read::Media),
-                Ok(bytes) => return Ok(Read::Ok { bytes }),
-                Err(err) => match classify(&err) {
-                    Fault::Removed => return Err(EngineError::DeviceRemoved { sector: start }),
-                    Fault::Fatal => {
-                        return Err(EngineError::Fatal {
-                            sector: start,
-                            source: err,
-                        });
+            let req = ReadRequest {
+                offset: start * ss,
+                len: (n * ss) as usize,
+                align,
+            };
+            let outcome = self.reader.read(req, self.cfg.read_timeout);
+            let err = match outcome {
+                ReaderOutcome::Done(Ok((_, 0))) => return Ok(Read::Media),
+                ReaderOutcome::Done(Ok((buf, bytes))) => return Ok(Read::Ok { buf, bytes }),
+                ReaderOutcome::Done(Err(err)) => err,
+                ReaderOutcome::TimedOut => {
+                    // The read is stuck inside the device. Leave that thread to finish on its
+                    // own and continue with a fresh reader.
+                    self.reader = Reader::spawn(Arc::clone(&self.dev));
+                    HalError::Io(io::Error::new(io::ErrorKind::TimedOut, "read timed out"))
+                }
+                ReaderOutcome::Stopped => {
+                    self.reader = Reader::spawn(Arc::clone(&self.dev));
+                    HalError::Io(io::Error::other("reader thread stopped"))
+                }
+            };
+            match classify(&err) {
+                Fault::Removed => return Err(EngineError::DeviceRemoved { sector: start }),
+                Fault::Fatal => {
+                    return Err(EngineError::Fatal {
+                        sector: start,
+                        source: err,
+                    });
+                }
+                Fault::Media => {
+                    if attempt >= retries {
+                        return Ok(Read::Media);
                     }
-                    Fault::Media => {
-                        if attempt >= retries {
-                            return Ok(Read::Media);
-                        }
-                        attempt += 1;
-                    }
-                },
+                    attempt += 1;
+                }
             }
         }
     }
 
-    /// Writes the first `bytes` of the working buffer for sectors starting at `start`, and records
-    /// the sectors they cover. `requested` is the sector count that was asked for.
-    fn commit(&mut self, start: u64, bytes: usize, requested: u64) -> Result<(), EngineError> {
+    /// Writes the first `bytes` of `buf` for sectors starting at `start`, and records the sectors
+    /// they cover. `requested` is the sector count that was asked for.
+    fn commit(
+        &mut self,
+        start: u64,
+        buf: &AlignedBuf,
+        bytes: usize,
+        requested: u64,
+    ) -> Result<(), EngineError> {
         let ss = u64::from(self.geo.sector_size);
         let covered = (bytes as u64).div_ceil(ss).min(requested);
         self.out
-            .write_block(start * ss, &self.buf[..bytes])
+            .write_block(start * ss, &buf[..bytes])
             .map_err(EngineError::Output)?;
         self.map.set(start, covered, BlockStatus::Recovered)?;
         Ok(())
@@ -301,17 +399,35 @@ impl<'a, D: RawDevice> Engine<'a, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
     use std::collections::HashSet;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Instant;
 
-    /// In-memory device with injectable bad sectors and an optional disconnect.
+    /// Thread-safe in-memory device with injectable bad sectors, hangs and a disconnect.
     struct MockDev {
         data: Vec<u8>,
         ss: u32,
         bad: HashSet<u64>,
-        reads: Cell<u64>,
+        /// Sectors whose reads block for `hang_for` before failing.
+        hang: HashSet<u64>,
+        hang_for: Duration,
+        reads: AtomicU64,
         disconnect_after_reads: Option<u64>,
+    }
+
+    impl MockDev {
+        fn new(data: Vec<u8>, bad: HashSet<u64>) -> Self {
+            Self {
+                data,
+                ss: 512,
+                bad,
+                hang: HashSet::new(),
+                hang_for: Duration::from_millis(0),
+                reads: AtomicU64::new(0),
+                disconnect_after_reads: None,
+            }
+        }
     }
 
     impl RawDevice for MockDev {
@@ -323,14 +439,17 @@ mod tests {
         }
 
         fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, HalError> {
-            let n = self.reads.get() + 1;
-            self.reads.set(n);
+            let n = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
             if self.disconnect_after_reads.is_some_and(|limit| n > limit) {
                 return Err(io::Error::from_raw_os_error(19).into()); // ENODEV
             }
             let ss = u64::from(self.ss);
             let first = offset / ss;
             let last = (offset + buf.len() as u64).div_ceil(ss);
+            if (first..last).any(|s| self.hang.contains(&s)) {
+                std::thread::sleep(self.hang_for);
+                return Err(io::Error::other("hung then failed").into());
+            }
             if (first..last).any(|s| self.bad.contains(&s)) {
                 return Err(io::Error::other("simulated media error").into());
             }
@@ -363,23 +482,18 @@ mod tests {
             chunk_bytes: 8 * 512,
             pass2_retries: 1,
             trim_retries: 2,
+            read_timeout: Duration::from_secs(5),
         }
     }
 
     #[test]
     fn clean_device_images_exactly() {
         let data = pattern(200, 512);
-        let dev = MockDev {
-            data: data.clone(),
-            ss: 512,
-            bad: HashSet::new(),
-            reads: Cell::new(0),
-            disconnect_after_reads: None,
-        };
+        let dev = Arc::new(MockDev::new(data.clone(), HashSet::new()));
         let map = Mapfile::open_or_create(&tmp("clean.map"), 512, 200).unwrap();
         let img_path = tmp("clean.img");
         let out = OutputImage::create(&img_path, 200 * 512).unwrap();
-        let mut eng = Engine::new(&dev, map, out, cfg_small()).unwrap();
+        let mut eng = Engine::new(dev, map, out, cfg_small()).unwrap();
         for p in 1..=3 {
             eng.run_pass(p).unwrap();
         }
@@ -394,17 +508,11 @@ mod tests {
     fn bad_sectors_are_isolated_and_zero_filled() {
         let data = pattern(200, 512);
         let bad: HashSet<u64> = [10u64, 11, 150].into_iter().collect();
-        let dev = MockDev {
-            data: data.clone(),
-            ss: 512,
-            bad: bad.clone(),
-            reads: Cell::new(0),
-            disconnect_after_reads: None,
-        };
+        let dev = Arc::new(MockDev::new(data.clone(), bad.clone()));
         let map = Mapfile::open_or_create(&tmp("bad.map"), 512, 200).unwrap();
         let img_path = tmp("bad.img");
         let out = OutputImage::create(&img_path, 200 * 512).unwrap();
-        let mut eng = Engine::new(&dev, map, out, cfg_small()).unwrap();
+        let mut eng = Engine::new(dev, map, out, cfg_small()).unwrap();
         for p in 1..=3 {
             eng.run_pass(p).unwrap();
         }
@@ -430,6 +538,40 @@ mod tests {
     }
 
     #[test]
+    fn hung_read_times_out_and_the_rest_of_the_disk_is_imaged() {
+        let data = pattern(40, 512);
+        let mut dev = MockDev::new(data.clone(), HashSet::new());
+        dev.hang = [7u64].into_iter().collect();
+        dev.hang_for = Duration::from_millis(1500);
+        let map = Mapfile::open_or_create(&tmp("hang.map"), 512, 40).unwrap();
+        let img_path = tmp("hang.img");
+        let out = OutputImage::create(&img_path, 40 * 512).unwrap();
+        let cfg = EngineConfig {
+            read_timeout: Duration::from_millis(150),
+            ..cfg_small()
+        };
+        let mut eng = Engine::new(Arc::new(dev), map, out, cfg).unwrap();
+        let started = Instant::now();
+        for p in 1..=3 {
+            eng.run_pass(p).unwrap();
+        }
+        // Each timed-out read costs one timeout, not the device's full hang.
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            started.elapsed()
+        );
+        let t = eng.totals();
+        assert_eq!(t.bad, 512, "only the hung sector is lost");
+        assert_eq!(t.recovered, 39 * 512);
+        eng.finish().unwrap();
+        let img = std::fs::read(&img_path).unwrap();
+        assert!(img[7 * 512..8 * 512].iter().all(|&b| b == 0));
+        assert_eq!(&img[..7 * 512], &data[..7 * 512]);
+        assert_eq!(&img[8 * 512..], &data[8 * 512..]);
+    }
+
+    #[test]
     fn disconnect_then_resume_completes_image() {
         let data = pattern(120, 512);
         let bad: HashSet<u64> = [40u64].into_iter().collect();
@@ -438,35 +580,24 @@ mod tests {
 
         // First run: the device vanishes partway through pass 1.
         {
-            let dev = MockDev {
-                data: data.clone(),
-                ss: 512,
-                bad: bad.clone(),
-                reads: Cell::new(0),
-                disconnect_after_reads: Some(5),
-            };
+            let mut dev = MockDev::new(data.clone(), bad.clone());
+            dev.disconnect_after_reads = Some(5);
             let map = Mapfile::open_or_create(&map_path, 512, 120).unwrap();
             let out = OutputImage::create(&img_path, 120 * 512).unwrap();
-            let mut eng = Engine::new(&dev, map, out, cfg_small()).unwrap();
+            let mut eng = Engine::new(Arc::new(dev), map, out, cfg_small()).unwrap();
             let err = eng.run_pass(1).unwrap_err();
             assert!(matches!(err, EngineError::DeviceRemoved { .. }), "{err}");
         }
 
         // Resume with a healthy device: map and image carry on from where they stopped.
-        let dev = MockDev {
-            data: data.clone(),
-            ss: 512,
-            bad,
-            reads: Cell::new(0),
-            disconnect_after_reads: None,
-        };
+        let dev = MockDev::new(data.clone(), bad);
         let map = Mapfile::open_or_create(&map_path, 512, 120).unwrap();
         assert!(
             map.totals().recovered > 0,
             "progress before the disconnect was saved"
         );
         let out = OutputImage::open_resume(&img_path, 120 * 512).unwrap();
-        let mut eng = Engine::new(&dev, map, out, cfg_small()).unwrap();
+        let mut eng = Engine::new(Arc::new(dev), map, out, cfg_small()).unwrap();
         for p in 1..=3 {
             eng.run_pass(p).unwrap();
         }

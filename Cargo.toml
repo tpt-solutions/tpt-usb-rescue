@@ -6,6 +6,7 @@ members = [
     "crates/tpt-usb-rescue-carver",
     "crates/tpt-usb-rescue-fs",
     "crates/tpt-usb-rescue",
+    "crates/tpt-usb-rescue-gui",
 ]
 
 [workspace.package]
@@ -21,6 +22,7 @@ categories = ["command-line-utilities", "filesystem"]
 
 [workspace.dependencies]
 tpt-usb-rescue-hal = { path = "crates/tpt-usb-rescue-hal", version = "0.1.0" }
+tpt-usb-rescue = { path = "crates/tpt-usb-rescue", version = "0.1.0" }
 tpt-usb-rescue-imager = { path = "crates/tpt-usb-rescue-imager", version = "0.1.0" }
 tpt-usb-rescue-carver = { path = "crates/tpt-usb-rescue-carver", version = "0.1.0" }
 tpt-usb-rescue-fs = { path = "crates/tpt-usb-rescue-fs", version = "0.1.0" }

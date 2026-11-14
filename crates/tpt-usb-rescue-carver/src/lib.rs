@@ -8,6 +8,7 @@
 //! Output is written by [`extract::write_carved`]; [`integrity`] hashes images and carved files.
 
 pub mod extract;
+pub mod formats;
 pub mod integrity;
 pub mod signature;
 pub mod validate;
@@ -48,6 +49,16 @@ impl Default for CarveOptions {
     }
 }
 
+/// Whether the secondary check of a signature (e.g. "WEBP" inside RIFF) matches at `hit`.
+fn check_ok(data: &[u8], hit: usize, sig: &Signature) -> bool {
+    match sig.check_at {
+        None => true,
+        Some((off, bytes)) => data
+            .get(hit + off..hit + off + bytes.len())
+            .is_some_and(|got| got == bytes),
+    }
+}
+
 /// Finds and validates files in `data`. Results are ordered by start offset and never overlap.
 pub fn carve(data: &[u8], opts: &CarveOptions, validator: &dyn MediaValidator) -> Vec<CarvedFile> {
     let mut hits: Vec<(usize, &Signature)> = SIGNATURES
@@ -55,7 +66,9 @@ pub fn carve(data: &[u8], opts: &CarveOptions, validator: &dyn MediaValidator) -
         .flat_map(|sig| {
             signature::find_all(data, sig.header)
                 .into_iter()
-                .map(move |o| (o, sig))
+                .filter(move |&o| check_ok(data, o, sig))
+                .filter(move |&o| o >= sig.start_adjust)
+                .map(move |o| (o - sig.start_adjust, sig))
         })
         .collect();
     hits.sort_by_key(|(offset, _)| *offset);

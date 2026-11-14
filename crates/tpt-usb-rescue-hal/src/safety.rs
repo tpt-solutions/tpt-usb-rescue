@@ -73,11 +73,15 @@ pub fn path_on_device(path: &Path, device: &Path) -> Result<bool, HalError> {
     {
         crate::linux::path_on_device(path, device)
     }
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos::path_on_device(path, device)
+    }
     #[cfg(windows)]
     {
         crate::windows::path_on_device(path, device)
     }
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = (path, device);
         Err(HalError::Unsupported)

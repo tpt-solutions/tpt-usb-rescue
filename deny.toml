@@ -1,0 +1,28 @@
+# cargo-deny policy: run `cargo deny check` before a release.
+
+[graph]
+all-features = true
+
+[advisories]
+ignore = []
+
+[licenses]
+# A dual-licensed crate such as `MIT OR Apache-2.0` is accepted because its MIT option is allowed.
+# A crate offered only under Apache-2.0 is rejected, which is the project's dependency rule.
+allow = [
+    "MIT",
+    "MIT-0",
+    "CC0-1.0",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

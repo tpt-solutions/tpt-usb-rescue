@@ -2,3 +2,8 @@
 *.img
 *.map
 Cargo.lock.bak
+
+# cargo-fuzz output
+fuzz/target
+fuzz/corpus
+fuzz/artifacts

@@ -21,11 +21,15 @@ pub fn list_devices() -> Result<Vec<DeviceInfo>, HalError> {
     {
         crate::linux::list()
     }
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos::list()
+    }
     #[cfg(windows)]
     {
         crate::windows::list()
     }
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         Err(HalError::Unsupported)
     }

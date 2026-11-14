@@ -7,6 +7,7 @@
 
 pub mod exfat;
 pub mod fat32;
+pub mod ntfs;
 
 use std::fmt;
 
@@ -50,6 +51,7 @@ pub trait Filesystem {
 pub enum VolumeKind {
     Fat32,
     ExFat,
+    Ntfs,
 }
 
 impl fmt::Display for VolumeKind {
@@ -57,6 +59,7 @@ impl fmt::Display for VolumeKind {
         f.write_str(match self {
             VolumeKind::Fat32 => "FAT32",
             VolumeKind::ExFat => "exFAT",
+            VolumeKind::Ntfs => "NTFS",
         })
     }
 }
@@ -76,10 +79,15 @@ pub fn open(image: &[u8], offset: u64) -> Result<Box<dyn Filesystem + '_>, FsErr
         Err(FsError::NotThisFilesystem(_)) => {}
         Err(e) => return Err(e),
     }
-    exfat::ExFat::open(image, base).map(|fs| Box::new(fs) as Box<dyn Filesystem + '_>)
+    match exfat::ExFat::open(image, base) {
+        Ok(fs) => return Ok(Box::new(fs)),
+        Err(FsError::NotThisFilesystem(_)) => {}
+        Err(e) => return Err(e),
+    }
+    ntfs::Ntfs::open(image, base).map(|fs| Box::new(fs) as Box<dyn Filesystem + '_>)
 }
 
-/// Scans every sector-aligned offset for FAT32 or exFAT boot sectors.
+/// Scans every sector-aligned offset for FAT32, exFAT or NTFS boot sectors.
 ///
 /// This works without a partition table, so it finds volumes behind a corrupted MBR. Hits are
 /// returned in offset order. The scan is linear in the image size.
@@ -91,6 +99,8 @@ pub fn detect(image: &[u8]) -> Vec<DetectedVolume> {
         if sector[510..512] == [0x55, 0xAA] {
             let kind = if &sector[3..11] == b"EXFAT   " {
                 Some(VolumeKind::ExFat)
+            } else if &sector[3..11] == b"NTFS    " {
+                Some(VolumeKind::Ntfs)
             } else if &sector[82..90] == b"FAT32   " {
                 Some(VolumeKind::Fat32)
             } else {
@@ -154,6 +164,10 @@ pub(crate) fn le32(b: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?))
 }
 
+pub(crate) fn le64(b: &[u8], at: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(b.get(at..at + 8)?.try_into().ok()?))
+}
+
 /// Returns `image[start..start+len]` or `OutOfBounds`.
 pub(crate) fn slice(image: &[u8], start: usize, len: usize) -> Result<&[u8], FsError> {
     start
@@ -188,6 +202,28 @@ mod tests {
         let entries = fs.entries();
         let hello = entries.iter().find(|e| e.path == "/HELLO.TXT").unwrap();
         assert_eq!(fs.read(hello).unwrap(), b"hello world");
+    }
+
+    #[test]
+    fn finds_ntfs_volume_behind_garbage() {
+        let volume = crate::ntfs::test_image::build();
+        let mut img = vec![0x5Au8; 16 * 512];
+        let offset = img.len() as u64;
+        img.extend_from_slice(&volume);
+        assert_eq!(
+            detect(&img),
+            vec![DetectedVolume {
+                offset,
+                kind: VolumeKind::Ntfs
+            }]
+        );
+        let fs = open(&img, offset).unwrap();
+        let hello = fs
+            .entries()
+            .into_iter()
+            .find(|e| e.path == "/HELLO.TXT")
+            .unwrap();
+        assert_eq!(fs.read(&hello).unwrap(), b"hello ntfs");
     }
 
     #[test]

@@ -9,10 +9,26 @@
 pub enum FileType {
     Jpeg,
     Png,
-    Pdf,
     Gif,
+    Bmp,
+    Tiff,
+    Webp,
+    Wav,
+    Avi,
+    Mp3,
+    Flac,
+    Ogg,
+    Pdf,
     /// Generic ZIP container; also covers DOCX, XLSX and similar Office formats.
     Zip,
+    /// ISO base media: MP4 and QuickTime MOV.
+    Mp4,
+    Mkv,
+    SevenZip,
+    Rar,
+    Gzip,
+    Sqlite,
+    Psd,
 }
 
 impl FileType {
@@ -20,9 +36,24 @@ impl FileType {
         match self {
             FileType::Jpeg => "jpg",
             FileType::Png => "png",
-            FileType::Pdf => "pdf",
             FileType::Gif => "gif",
+            FileType::Bmp => "bmp",
+            FileType::Tiff => "tif",
+            FileType::Webp => "webp",
+            FileType::Wav => "wav",
+            FileType::Avi => "avi",
+            FileType::Mp3 => "mp3",
+            FileType::Flac => "flac",
+            FileType::Ogg => "ogg",
+            FileType::Pdf => "pdf",
             FileType::Zip => "zip",
+            FileType::Mp4 => "mp4",
+            FileType::Mkv => "mkv",
+            FileType::SevenZip => "7z",
+            FileType::Rar => "rar",
+            FileType::Gzip => "gz",
+            FileType::Sqlite => "sqlite",
+            FileType::Psd => "psd",
         }
     }
 
@@ -30,9 +61,24 @@ impl FileType {
         match self {
             FileType::Jpeg => "JPEG",
             FileType::Png => "PNG",
-            FileType::Pdf => "PDF",
             FileType::Gif => "GIF",
+            FileType::Bmp => "BMP",
+            FileType::Tiff => "TIFF",
+            FileType::Webp => "WEBP",
+            FileType::Wav => "WAV",
+            FileType::Avi => "AVI",
+            FileType::Mp3 => "MP3",
+            FileType::Flac => "FLAC",
+            FileType::Ogg => "OGG",
+            FileType::Pdf => "PDF",
             FileType::Zip => "ZIP",
+            FileType::Mp4 => "MP4",
+            FileType::Mkv => "MKV",
+            FileType::SevenZip => "7Z",
+            FileType::Rar => "RAR",
+            FileType::Gzip => "GZIP",
+            FileType::Sqlite => "SQLITE",
+            FileType::Psd => "PSD",
         }
     }
 }
@@ -44,51 +90,104 @@ pub struct Signature {
     pub header: &'static [u8],
     /// Upper bound on carved size; scanning never reads past `start + max_size`.
     pub max_size: u64,
+    /// Extra bytes that must also match, at a fixed offset from the header (e.g. "WEBP" inside RIFF).
+    pub check_at: Option<(usize, &'static [u8])>,
+    /// The file starts this many bytes before the matched header (e.g. MP4's `ftyp` at offset 4).
+    pub start_adjust: usize,
 }
+
+const fn sig(file_type: FileType, header: &'static [u8], max_size: u64) -> Signature {
+    Signature {
+        file_type,
+        header,
+        max_size,
+        check_at: None,
+        start_adjust: 0,
+    }
+}
+
+const fn sig_at(
+    file_type: FileType,
+    header: &'static [u8],
+    max_size: u64,
+    off: usize,
+    extra: &'static [u8],
+) -> Signature {
+    Signature {
+        file_type,
+        header,
+        max_size,
+        check_at: Some((off, extra)),
+        start_adjust: 0,
+    }
+}
+
+const MB: u64 = 1 << 20;
+const GB: u64 = 1 << 30;
 
 /// Compiled-in signature table.
 pub const SIGNATURES: &[Signature] = &[
+    sig(FileType::Jpeg, &[0xFF, 0xD8, 0xFF], 64 * MB),
+    sig(
+        FileType::Png,
+        &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A],
+        128 * MB,
+    ),
+    sig(FileType::Gif, b"GIF89a", 32 * MB),
+    sig(FileType::Gif, b"GIF87a", 32 * MB),
+    sig(FileType::Bmp, b"BM", 64 * MB),
+    sig(FileType::Tiff, b"II*\0", 256 * MB),
+    sig(FileType::Tiff, b"MM\0*", 256 * MB),
+    sig_at(FileType::Webp, b"RIFF", 256 * MB, 8, b"WEBP"),
+    sig_at(FileType::Wav, b"RIFF", GB, 8, b"WAVE"),
+    sig_at(FileType::Avi, b"RIFF", 4 * GB, 8, b"AVI "),
+    sig(FileType::Mp3, b"ID3", 64 * MB),
+    sig(FileType::Flac, b"fLaC", 2 * GB),
+    sig(FileType::Ogg, b"OggS", 2 * GB),
+    sig(FileType::Pdf, b"%PDF-", 512 * MB),
+    sig(FileType::Zip, &[b'P', b'K', 0x03, 0x04], 2 * GB),
     Signature {
-        file_type: FileType::Jpeg,
-        header: &[0xFF, 0xD8, 0xFF],
-        max_size: 64 << 20,
+        file_type: FileType::Mp4,
+        header: b"ftyp",
+        max_size: 4 * GB,
+        check_at: None,
+        start_adjust: 4,
     },
-    Signature {
-        file_type: FileType::Png,
-        header: &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A],
-        max_size: 128 << 20,
-    },
-    Signature {
-        file_type: FileType::Pdf,
-        header: b"%PDF-",
-        max_size: 512 << 20,
-    },
-    Signature {
-        file_type: FileType::Gif,
-        header: b"GIF89a",
-        max_size: 32 << 20,
-    },
-    Signature {
-        file_type: FileType::Gif,
-        header: b"GIF87a",
-        max_size: 32 << 20,
-    },
-    Signature {
-        file_type: FileType::Zip,
-        header: &[b'P', b'K', 0x03, 0x04],
-        max_size: 2 << 30,
-    },
+    sig(FileType::Mkv, &[0x1A, 0x45, 0xDF, 0xA3], 4 * GB),
+    sig(
+        FileType::SevenZip,
+        &[b'7', b'z', 0xBC, 0xAF, 0x27, 0x1C],
+        4 * GB,
+    ),
+    sig(FileType::Rar, b"Rar!\x1A\x07", 4 * GB),
+    sig(FileType::Gzip, &[0x1F, 0x8B, 0x08], 4 * GB),
+    sig(FileType::Sqlite, b"SQLite format 3\0", 4 * GB),
+    sig(FileType::Psd, b"8BPS\0\x01", 4 * GB),
 ];
 
 /// Returns the offset (relative to `data`) one past the end of the file starting at `data[0]`,
 /// or `None` if the structure never closes within `data`.
 pub fn find_end(file_type: FileType, data: &[u8]) -> Option<usize> {
+    use crate::formats as f;
     match file_type {
         FileType::Jpeg => walk_jpeg(data).end,
         FileType::Png => walk_png(data).end,
         FileType::Pdf => find_pdf_end(data),
         FileType::Gif => walk_gif(data).end,
         FileType::Zip => walk_zip(data).end,
+        FileType::Bmp => f::bmp_end(data),
+        FileType::Webp | FileType::Wav | FileType::Avi => f::riff_end(data),
+        FileType::Ogg => f::ogg_end(data),
+        FileType::Mp4 => f::mp4_end(data),
+        FileType::SevenZip => f::sevenz_end(data),
+        FileType::Rar => f::rar4_end(data),
+        FileType::Sqlite => f::sqlite_end(data),
+        FileType::Tiff
+        | FileType::Mp3
+        | FileType::Flac
+        | FileType::Mkv
+        | FileType::Gzip
+        | FileType::Psd => None,
     }
 }
 

@@ -1,0 +1,17 @@
+[package]
+name = "tpt-usb-rescue-gui"
+description = "Windows GUI for tpt-usb-rescue (Win32 API, no third-party GUI dependencies)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tpt-usb-rescue.workspace = true
+tpt-usb-rescue-hal.workspace = true
+tpt-usb-rescue-imager.workspace = true

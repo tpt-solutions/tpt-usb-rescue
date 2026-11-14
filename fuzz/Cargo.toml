@@ -1,0 +1,43 @@
+[package]
+name = "tpt-usb-rescue-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tpt-usb-rescue-carver = { path = "../crates/tpt-usb-rescue-carver" }
+tpt-usb-rescue-fs = { path = "../crates/tpt-usb-rescue-fs" }
+
+[[bin]]
+name = "carve"
+path = "fuzz_targets/carve.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fat32"
+path = "fuzz_targets/fat32.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "exfat"
+path = "fuzz_targets/exfat.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ntfs"
+path = "fuzz_targets/ntfs.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

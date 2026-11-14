@@ -19,6 +19,21 @@ pub struct BuiltinValidator;
 impl MediaValidator for BuiltinValidator {
     fn validate(&self, file_type: FileType, data: &[u8]) -> f32 {
         let checks: &[bool] = &match file_type {
+            FileType::Bmp => crate::formats::bmp_checks(data),
+            FileType::Tiff => crate::formats::tiff_checks(data),
+            FileType::Webp => crate::formats::webp_checks(data),
+            FileType::Wav => crate::formats::wav_checks(data),
+            FileType::Avi => crate::formats::avi_checks(data),
+            FileType::Mp3 => crate::formats::mp3_checks(data),
+            FileType::Flac => crate::formats::flac_checks(data),
+            FileType::Ogg => crate::formats::ogg_checks(data),
+            FileType::Mp4 => crate::formats::mp4_checks(data),
+            FileType::Mkv => crate::formats::mkv_checks(data),
+            FileType::SevenZip => crate::formats::sevenz_checks(data),
+            FileType::Rar => crate::formats::rar_checks(data),
+            FileType::Gzip => crate::formats::gzip_checks(data),
+            FileType::Sqlite => crate::formats::sqlite_checks(data),
+            FileType::Psd => crate::formats::psd_checks(data),
             FileType::Jpeg => {
                 let w = walk_jpeg(data);
                 [

@@ -23,3 +23,7 @@ crc32fast.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+
+[[bench]]
+name = "carve"
+harness = false

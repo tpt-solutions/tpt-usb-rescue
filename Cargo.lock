@@ -582,6 +582,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tpt-usb-rescue-gui"
+version = "0.1.0"
+dependencies = [
+ "tpt-usb-rescue",
+ "tpt-usb-rescue-hal",
+ "tpt-usb-rescue-imager",
+]
+
+[[package]]
 name = "tpt-usb-rescue-hal"
 version = "0.1.0"
 dependencies = [
