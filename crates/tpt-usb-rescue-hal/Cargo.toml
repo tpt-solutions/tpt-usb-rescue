@@ -7,9 +7,15 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+readme = "README.md"
+keywords = ["usb", "raw-device", "direct-io", "block-device", "hal"]
+categories = ["hardware-support", "os"]
 
 [lints]
 workspace = true
 
 [dependencies]
 thiserror.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
