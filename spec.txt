@@ -1,0 +1,142 @@
+Design Specification: tpt-usb-rescue
+Version: 0.1.0-draft
+Status: Conceptual / Pre-Alpha
+License: Dual MIT / Apache-2.0
+Ecosystem Layer: Verticals / Engines (tpt-solutions)
+1. Executive Summary
+tpt-usb-rescue is a high-performance, memory-safe, forensic data recovery engine written in Rust. It is designed to extract data from degraded, logically corrupted, or partially failing USB mass storage devices.
+Unlike standard OS-level copy tools that fail on I/O errors, tpt-usb-rescue operates in two distinct phases: Phase 1 (Forensic Imaging) bypasses the OS filesystem to read raw NAND blocks, gracefully handling bad sectors via a multi-pass algorithm. Phase 2 (Heuristic Carving & Parsing) reconstructs files from the raw image using magic-number signatures and filesystem metadata, leveraging the tpt-media family to mathematically verify the integrity of extracted media.
+2. Core Architectural Principles
+Direct I/O & Cache Bypass: Never trust the OS page cache. The tool must use OS-specific Direct I/O flags (O_DIRECT on Linux, FILE_FLAG_NO_BUFFERING on Windows) to prevent the kernel from hanging on failing hardware.
+Deterministic State Machines: The imaging loop must be a strictly verified state machine. If the process is killed, it must resume exactly where it left off using a persistent mapfile.
+Zero-Copy Processing: File carving and signature scanning should operate on memory-mapped slices of the image file to minimize RAM overhead and maximize throughput.
+Verification-First: Extracted files aren't just saved; they are validated. Carved media files are passed through tpt-media parsers to ensure they are structurally sound, not just false-positive header matches.
+3. Subsystem Breakdown
+3.1. Subsystem A: rescue-imager (Physical Recovery)
+This subsystem handles the raw block device. It is conceptually similar to ddrescue but built in Rust with strict memory safety.
+The Mapfile: A persistent binary or TOML file that tracks the state of every block on the drive (e.g., + for recovered, - for bad/unreadable, ? for untested).
+Multi-Pass Algorithm:
+Pass 1 (Sequential Sweep): Reads large chunks (e.g., 1MB). On I/O error, marks the chunk as bad and moves on. Maximizes data recovered in the shortest time before the drive potentially dies completely.
+Pass 2 (Sector Retries): Re-reads the bad chunks in smaller increments (e.g., 4KB, then 512 bytes) to squeeze out remaining data.
+Pass 3 (Trimming): Retries the edges of bad blocks to find the exact sector boundary where the failure starts.
+Sparse File Output: Writes the output image as a sparse file to save disk space, filling unrecoverable bad sectors with zeroes to maintain byte-alignment.
+3.2. Subsystem B: rescue-carver (Logical Recovery)
+This subsystem operates on the generated .img file, ignoring filesystem structures entirely.
+Signature Database: A compiled-in database of file headers (magic numbers) and footers (e.g., JPEG FF D8 to FF D9).
+Zero-Copy Scanner: Uses memmap2 to map the image file into memory and uses SIMD-optimized byte scanning (via tpt-math or standard Rust slices) to find headers.
+tpt-media Integration (The Killer Feature): When a potential file is carved out, it is passed to the tpt-media codec parsers. If tpt-media rejects the file as structurally invalid (e.g., a JPEG header was found, but the Huffman tables are garbage), the carver discards it or flags it as "corrupted" rather than saving a broken file.
+3.3. Subsystem C: rescue-fs (Filesystem Parser)
+For drives where the NAND is fine but the partition table/FAT is corrupted.
+Parses raw FAT32, exFAT, and NTFS structures directly from the byte slice.
+Rebuilds the directory tree in memory and extracts files based on cluster chains, bypassing the OS's "Drive needs formatting" error.
+4. Hardware Abstraction Layer (HAL)
+To achieve cross-platform raw disk access, tpt-usb-rescue requires a specialized HAL crate: tpt-usb-rescue-hal.
+Feature
+Linux Implementation
+Windows Implementation
+macOS Implementation
+Device Path
+/dev/sdX or /dev/nvmeXn1
+\\.\PhysicalDriveX
+/dev/rdiskX (raw)
+Open Flags
+O_RDONLY | O_DIRECT | O_SYNC
+GENERIC_READ, FILE_FLAG_NO_BUFFERING
+O_RDONLY (raw devices bypass cache)
+Block Size Query
+BLKSSZGET (ioctl)
+IOCTL_STORAGE_GET_DRIVE_GEOMETRY
+DKIOCGETBLOCKSIZE (ioctl)
+Capacity Query
+BLKGETSIZE64 (ioctl)
+IOCTL_DISK_GET_DRIVE_GEOMETRY_EX
+DKIOCGETBLOCKCOUNT (ioctl)
+Note: On Linux, O_DIRECT requires memory buffers to be aligned to the block size (usually 512 or 4096 bytes). The HAL must handle aligned memory allocation (e.g., using std::alloc::alloc with specific layouts or the aligned_alloc crate).
+5. Data Structures & Memory Layout
+5.1. The Block Map (Mapfile)
+To ensure the imager can resume, the state of the drive is tracked.
+// Represents a contiguous region of blocks with the same status
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockRegion {
+    pub start_sector: u64,
+    pub length_sectors: u32,
+    pub status: BlockStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockStatus {
+    Untested,
+    Recovered,
+    BadSector,
+    NonTrimmed, // Edge of a bad block
+}
+
+// The mapfile is an append-only log of these regions to ensure 
+// crash safety. If the app crashes, we replay the log on startup.
+
+5.2. Carved File Record
+
+pub struct CarvedFile {
+    pub id: u64,
+    pub file_type: FileType, // e.g., JPEG, PNG, PDF
+    pub start_offset: u64,
+    pub end_offset: u64,
+    pub size_bytes: u64,
+    pub integrity_score: f32, // 0.0 to 1.0, derived from tpt-media validation
+    pub is_fragmented: bool,
+}
+
+6. CLI Interface Design
+The tool will use clap for a clean, subcommand-driven CLI.
+
+# Phase 1: Image a failing drive
+tpt-usb-rescue image /dev/sdb ./recovery.img --mapfile ./recovery.map --pass 1
+
+# Resume imaging if interrupted
+tpt-usb-rescue image /dev/sdb ./recovery.img --mapfile ./recovery.map --resume
+
+# Phase 2: Carve files from the image
+tpt-usb-rescue carve ./recovery.img ./output_dir/ --validate-media
+
+# Analyze an image without extracting (shows filesystem stats)
+tpt-usb-rescue analyze ./recovery.img
+
+# Verify the integrity of the carved files against the raw image
+tpt-usb-rescue verify ./output_dir/ ./recovery.img
+
+7. Ecosystem Integration (tpt-solutions)
+tpt-usb-rescue will not be built in a vacuum. It will leverage your existing crates to maintain the "TPT" standard of quality:
+tpt-math: Used for high-performance, SIMD-accelerated hashing (BLAKE3/SHA-256) to generate cryptographic proofs of the raw image and the extracted files.
+tpt-media: Used in the carving phase. When a file is extracted, tpt-media attempts to parse its header/structure. If it parses successfully, the file is marked as 100% intact. If it fails, it's marked as corrupted.
+tpt-archon (Future): If tpt-archon's zero-copy storage layer matures, tpt-usb-rescue could use it as the backend for managing the massive sparse image files, avoiding traditional filesystem overhead.
+8. Development Roadmap
+Milestone 1: The HAL & Basic Imager (Weeks 1-3)
+Implement tpt-usb-rescue-hal for Linux and Windows.
+Build the basic sequential reader with O_DIRECT / Direct I/O.
+Implement the basic Mapfile (append-only log).
+Deliverable: Can clone a healthy USB drive to an .img file at maximum hardware speed.
+Milestone 2: The Multi-Pass Rescue Engine (Weeks 4-6)
+Implement error handling for I/O faults (catching std::io::Error of kind Uncategorized or InputOutput).
+Implement Pass 2 and Pass 3 (shrinking block sizes to isolate bad sectors).
+Implement sparse file writing.
+Deliverable: Can successfully image a drive with physical bad sectors without hanging the OS.
+Milestone 3: The Signature Carver (Weeks 7-9)
+Build the zero-copy memory-mapped scanner.
+Implement a basic signature database (Top 20 file types: JPEG, PNG, PDF, DOCX, MP4, etc.).
+Deliverable: Can extract files from a raw .img file with a corrupted partition table.
+Milestone 4: Verification & tpt Integration (Weeks 10-12)
+Integrate tpt-media to validate carved media files.
+Integrate tpt-math for BLAKE3 hashing of the image and files.
+Build the verify CLI subcommand.
+Deliverable: v1.0.0 Release.
+9. Edge Cases & Mitigations
+Edge Case
+Mitigation Strategy
+Drive disconnects mid-read
+Mapfile allows instant resume. Imager detects device removal and safely closes the file handles.
+Drive firmware locks up
+Implement a hardware-level timeout. If a read takes > 5 seconds, abort the read, mark block as bad, and issue a low-level SCSI/ATA reset to the USB controller.
+False positive signatures
+A random string of bytes might match a JPEG header. The tpt-media validation step will reject it if the internal structure (Huffman tables, SOF markers) is invalid.
+Fragmented files
+Phase 1 of the carver only handles contiguous files. Phase 2 (v2.0) will use filesystem metadata (if partially readable) to stitch fragmented clusters together.

@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/tpt-usb-rescue-hal",
+    "crates/rescue-imager",
+    "crates/rescue-carver",
+    "crates/rescue-fs",
+    "crates/tpt-usb-rescue",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+authors = ["TPT Solutions"]
+repository = "https://github.com/tpt-solutions/tpt-usb-rescue"
+homepage = "https://github.com/tpt-solutions/tpt-usb-rescue"
+keywords = ["forensics", "data-recovery", "usb", "ddrescue", "carving"]
+categories = ["command-line-utilities", "filesystem"]
+
+[workspace.dependencies]
+tpt-usb-rescue-hal = { path = "crates/tpt-usb-rescue-hal", version = "0.1.0" }
+rescue-imager = { path = "crates/rescue-imager", version = "0.1.0" }
+rescue-carver = { path = "crates/rescue-carver", version = "0.1.0" }
+rescue-fs = { path = "crates/rescue-fs", version = "0.1.0" }
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+memmap2 = "0.9"
+blake3 = "1"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"

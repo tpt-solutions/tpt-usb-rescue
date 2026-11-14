@@ -1,0 +1,21 @@
+[package]
+name = "tpt-usb-rescue"
+description = "Forensic data recovery engine for failing USB mass storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+clap.workspace = true
+tpt-usb-rescue-hal.workspace = true
+rescue-imager.workspace = true
+rescue-carver.workspace = true
+rescue-fs.workspace = true
