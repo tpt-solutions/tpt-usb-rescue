@@ -80,7 +80,7 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 - [x] `analyze --extract` sanitizes names from untrusted images (no `..`, drive prefixes, separators; tested)
 - [x] Resume guard counts any recorded progress, not only recovered/bad sectors
 - [x] System-disk and output-on-source guards cover partitions and volumes (Linux sysfs + mountinfo for btrfs/LVM/LUKS/md, macOS slices, Windows `\\.\X:` volumes)
-- [ ] macOS: system-disk guard on APFS (root is a synthesized container disk, not the physical disk)
+- [x] macOS: system-disk guard on APFS: follows the container to its physical disks with `diskutil`, and refuses when `diskutil` cannot answer (parser unit-tested; not run on a Mac)
 - [x] Short reads queue the unread tail for the next pass (tested)
 - [x] Image is fsynced before the mapfile records data as recovered
 - [x] Per-OS device-removal error codes (EIO stays a media error; tested)
@@ -101,14 +101,14 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 - [x] FAT32 long names: validate the LFN checksum, and keep the piece order of deleted names (tested)
 - [x] Tests added: resume with a truncated or missing image (end to end)
 - [x] Tests added: backup boot sector dedupe, engine `Fatal` path leaves the map untouched
-- [ ] Tests still missing: hostile extract names end to end (needs a crafted image), pass 3 behaviour
+- [x] Tests added: hostile extract names end to end (a copy of the practice image with one entry renamed), pass 3 recovers the edges of a bad run (engine test)
 
 ## 10. CLI usability and automation
 - [x] Progress on stderr (percent, bytes, rate, ETA, bad bytes); non-TTY aware; `--quiet` (a `-v` flag is not added)
 - [x] Ctrl-C stops cleanly through `ImageRequest.cancel` and prints how to resume; a second Ctrl-C quits at once (not hand-tested with a real terminal)
 - [x] Documented exit codes: 0 complete, 2 usage, 3 stopped or device removed, 4 verify mismatch, 5 finished with unrecovered data (docs/USAGE.md; 0, 2, 4 tested end to end, 3 and 5 need a device)
 - [x] `--json` output for image, carve, verify, list-devices, mapfile (docs/USAGE.md; tested)
-- [ ] `--json` for `analyze`
+- [x] `--json` for `analyze` (tested end to end)
 - [x] `--mapfile` defaults to `<output>.map`; "Phase 1/2" wording dropped; `analyze --extract` help fixed
 - [x] Tunables: `--timeout`, `--chunk-kib`, `--no-reset`
 - [ ] More tunables: `--min-score`, `--types`; optional `tpt-usb-rescue.toml`
@@ -134,7 +134,8 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 - [x] Fix the stray `` `r`n `` in CHANGELOG.md line 11
 - [x] `examples/`: `make-test-image` (bash and PowerShell; a noise image with hidden PNGs and a GIF), `recover.sh` / `recover.ps1` (image, analyze, carve, verify; resumes on re-run), chain-of-custody template (all run here)
 - [x] `examples/practice-fat32.img`: a FAT32 volume with a long name, a subfolder and a deleted file (the fuzz seed, pinned by an end-to-end test)
-- [ ] `examples/`: an NTFS or exFAT practice image; sample config once a config file exists
+- [x] `examples/`: `practice-exfat.img` and `practice-ntfs.img` (copies of the fuzz seeds; pinned by end-to-end tests)
+- [ ] `examples/`: sample config once a config file exists
 - [x] docs: `docs/TROUBLESHOOTING.md`, exit-code table in USAGE.md
 - [x] docs: failing-drive playbook (`docs/PLAYBOOK.md`)
 - [ ] docs: worked walkthrough with real output
@@ -156,7 +157,7 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 - [x] Real Linux block-device validation (`tools/linux-validate.sh`, 15 checks); it found and fixed the hung-area abort
 - [ ] Push the tag `v0.1.0-rc.1` to run the release workflow for the first time (not done; yours to do)
 - [ ] Hardware checks H1 to H7 in TESTING.md: real USB stick, real bad sectors, unplug and resume, USB reset, Windows drives and GUI, macOS
-- [ ] README status line: still says "pre-alpha" and "tested on synthetic data"; update it to match TESTING.md
+- [x] README status line: now release candidate 0.1.0-rc.1, matching TESTING.md
 - [ ] Decide whether to publish to crates.io, and `publish` for the GUI crate
 - [ ] A CI job for `tools/linux-validate.sh` (needs a runner with device-mapper `delay`; untried)
 

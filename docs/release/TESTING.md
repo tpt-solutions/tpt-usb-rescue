@@ -81,7 +81,7 @@ Carve, Verify and Analyze, and try Stop in the middle of imaging. Report anythin
 or breaks.
 
 **H7. macOS.** Run `list-devices`, then image a spare USB stick. **Do not image the disk macOS
-boots from:** the guard that refuses the system disk is not verified on APFS.
+boots from:** the guard follows APFS containers with `diskutil`, but that has not been run on a Mac.
 
 ## What to report
 

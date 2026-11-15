@@ -18,8 +18,19 @@ uses semantic versioning once 1.0.0 is released.
 - `verify` rejects `index.csv` entries that name files outside the output folder; `mapfile --out` never overwrites.
 - exFAT and FAT32: a cluster only exists if it lies inside the image, so a corrupt cluster count can no longer make a huge allocation (found by fuzzing the exFAT parser from a valid seed).
 - FAT32: long names are only used when their checksum matches the short entry that follows, and deleted multi-piece names keep their order.
+- A short read queues the unread tail for the next pass instead of dropping it.
+- The resume guard counts any recorded progress, not only recovered and bad sectors.
+- Windows: UNC output paths are refused instead of being matched to a made-up drive letter.
+- `mapfile --export --out` never overwrites an existing file, including the mapfile itself.
+- The USB reset retries re-authorizing the device and tells the user how to recover if it still fails.
+- `BLKGETSIZE64` is encoded correctly on MIPS, PowerPC and SPARC.
+- Pass 3 wording in the docs now matches what the code does (it trims inward from the edges of a bad run).
+- macOS system-disk guard: on an APFS Mac the root volume sits on a synthesized container disk, which the device-number check could not see. The guard now asks `diskutil` which physical disks back a volume, and refuses when `diskutil` cannot answer. Type-checked and parser-tested; not run on a Mac.
 
 ### Added
+- `tools/linux-validate.sh`: 15 checks on real Linux block devices (loop and device-mapper), covering unreadable sectors, hung reads, Ctrl-C with `--resume`, and the safety guards. It found and fixed the hung-area abort.
+- Release preparation: `docs/release/TESTING.md` (tester guide and hardware checklist), `docs/release/RELEASING.md` (process), and a tag-triggered release workflow that refuses a tag that does not match the crate version.
+- `tpt-usb-rescue-gui` has its own README and CHANGELOG.
 - `completions <shell>` and `man [--out-dir DIR]` generate shell completions and manual pages; the release archives include them and the examples.
 - `--json` for `image`, `carve`, `verify`, `list-devices` and `mapfile`: one JSON object on stdout, messages on stderr. `carve` now records a SHA-256 for every file in `index.csv`, and `verify` checks it.
 - `examples/practice-fat32.img`: a small FAT32 volume with a deleted file to try `analyze --extract` on.
@@ -49,22 +60,18 @@ uses semantic versioning once 1.0.0 is released.
   `analyze --extract`, `verify`, `list-devices`, `mapfile --export ddrescue|toml`.
 - Tests: unit tests, property tests for mapfile replay, no-panic property tests for parsers and
   the carver, and CLI end-to-end tests on synthetic images.
+- `analyze --json`: partitions, volumes and their entries as one JSON object on stdout.
+- `examples/practice-exfat.img` and `examples/practice-ntfs.img`: practice volumes for the exFAT and NTFS parsers, each with a deleted file.
+- Tests for pass-3 edge recovery in the imager, and for a hostile file name from an image, checked end to end.
 
 ### Changed
 - `tpt-usb-rescue-imager` and `tpt-usb-rescue-carver` expose real types instead of the scaffold placeholders.
   `BlockRegion::length_sectors` is now `u64`.
+- Workspace version is `0.1.0-rc.1`. Contributions are through GitHub issues only (pull requests are not accepted).
 
 ### Known limitations
-- Hardware paths (Linux and Windows device reads, device listing) are compiled and reviewed but
-  have not been run against physical USB media yet.
+- Real USB sticks, failing drives and Windows physical drives have not been tested yet. The Linux checks use loop and device-mapper devices, not hardware. The full hardware checklist is in [docs/release/TESTING.md](docs/release/TESTING.md).
 - Reads time out after 5 s. On Linux a timed-out read re-enumerates the USB device (needs root); this is not yet tested on hardware, and Windows has no reset.
-
-
-## [0.1.0] - 2026-11-14
-
-### Added
-- Cargo workspace (edition 2024, MSRV 1.85) with crates `tpt-usb-rescue-hal`, `tpt-usb-rescue-imager`,
-  `tpt-usb-rescue-carver`, `tpt-usb-rescue-fs` and the `tpt-usb-rescue` CLI.
-- Dual MIT / Apache-2.0 license files.
-- CLI skeleton with `image`, `carve`, `analyze`, `verify`, `list-devices` and `mapfile` subcommands.
-- CI workflow for Linux and Windows (fmt, clippy, tests) and an MSRV check.
+- macOS has never run. The system-disk guard asks `diskutil` which physical disks back an APFS volume; that code is type-checked and parser-tested, not run on a Mac. Do not image the disk macOS boots from.
+- Carving is contiguous only: fragmented files are not reassembled.
+- `--min-score` and `--types` are not available yet.

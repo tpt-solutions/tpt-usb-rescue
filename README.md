@@ -4,9 +4,12 @@
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
 Forensic data recovery engine (Rust) for degraded or corrupted USB mass storage.
-Status: **pre-alpha**. The imaging, carving and filesystem code is implemented and tested on
-synthetic data. Hardware paths are compiled but not yet validated on real failing media.
-See [spec.txt](spec.txt) and [TODO.md](TODO.md).
+
+Status: **release candidate 0.1.0-rc.1** (not yet tagged). The imaging, carving and filesystem
+code is tested on synthetic data and on real Linux block devices (loop and device-mapper). The
+Windows, macOS and real-USB-stick paths are compiled but **not yet tested on hardware**. Testers
+should read [docs/release/TESTING.md](docs/release/TESTING.md) for what has and has not been
+checked, and what to try. See also [spec.txt](spec.txt) and [TODO.md](TODO.md).
 
 1. **Image**: read-only, direct I/O, three passes, resumable via a crash-safe mapfile.
 2. **Carve / parse**: zero-copy signature carving (20 file types, including PNG, JPEG, PDF, ZIP/DOCX, MP4, 7z and SQLite) with structural
@@ -14,13 +17,14 @@ See [spec.txt](spec.txt) and [TODO.md](TODO.md).
 
 ## Install
 
-Prebuilt binaries for Windows (CLI and GUI), Linux and macOS are attached to each
-[GitHub Release](https://github.com/tpt-solutions/tpt-usb-rescue/releases). Download the archive
-for your system, check it against `SHA256SUMS`, and unpack it. Or build from source:
+Release candidates are published as pre-releases on the
+[GitHub Releases](https://github.com/tpt-solutions/tpt-usb-rescue/releases) page once `v0.1.0-rc.1`
+is tagged. Each release has archives for Windows (CLI and GUI), Linux and macOS, plus a
+`SHA256SUMS` file: check the archive against it, then unpack it. Or build from source:
 
 ```sh
 cargo install --locked --git https://github.com/tpt-solutions/tpt-usb-rescue tpt-usb-rescue
-# once releases exist, this fetches the prebuilt binary instead of compiling:
+# after a release exists, this fetches the prebuilt binary instead of compiling:
 cargo binstall tpt-usb-rescue
 ```
 
@@ -59,11 +63,13 @@ lives on the source disk, and refuses the system disk unless `--allow-system-dis
 
 ## GUI (Windows)
 
-`target\release\tpt-usb-rescue-gui.exe` is a plain Win32 window with no third-party GUI
-dependencies. It runs the same operations as the CLI: pick a source device or file, an image path,
-then Start imaging, Carve, Verify or Analyze. Progress and results appear in the log. Physical drives
-need a window started as Administrator.
+`tpt-usb-rescue-gui.exe` is a plain Win32 window with no third-party GUI dependencies. It runs
+the same operations as the CLI through a four-step guide: choose the source, choose the output,
+copy the disk, then find files. Physical drives need a window started as Administrator. See
+[Usage](docs/USAGE.md#the-windows-gui) and the [GUI crate](crates/tpt-usb-rescue-gui/README.md).
+
 ## Workspace
+
 | Crate | Purpose |
 |---|---|
 | `tpt-usb-rescue-hal` | Raw read-only device access (Linux, Windows, macOS) |
@@ -73,6 +79,8 @@ need a window started as Administrator.
 | `tpt-usb-rescue` | CLI |
 | `tpt-usb-rescue-gui` | Windows GUI |
 
+Each crate has its own README and CHANGELOG under `crates/`.
+
 ## Documentation
 
 - [Usage](docs/USAGE.md): imaging, resume, carving, analysis, verification, exit codes and the GUI
@@ -81,10 +89,16 @@ need a window started as Administrator.
 - [Examples](examples/README.md): practice image, one-command recovery scripts (bash and PowerShell), chain-of-custody form
 - [Architecture](docs/ARCHITECTURE.md): crates, mapfile format, carving and filesystem design, safety model
 - [Supported formats](docs/FORMATS.md): the 20 carved types and the filesystems read
+- [Testing guide](docs/release/TESTING.md): what is verified, what is not, and what testers should try
+- [Release process](docs/release/RELEASING.md): how a version gets from `master` to a GitHub Release
 - [Release notes draft for 1.0.0](docs/release/1.0.0-DRAFT.md) (not published)
+- [CHANGELOG](CHANGELOG.md): all user-visible changes
+
 ## Contributing
+
 Contributions are handled through GitHub issues only; pull requests are not accepted. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
+
 Licensed under either of [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your option.
 Copyright (c) 2026 TPT Solutions. Unless you state otherwise, contributions are dual-licensed as above.

@@ -154,7 +154,7 @@ Code 5 is only returned when all three passes ran (no `--pass`, or `--pass 3`).
 
 ## Scripting with `--json`
 
-`--json` makes `image`, `carve`, `verify`, `list-devices` and `mapfile` print their result as one
+`--json` makes `image`, `carve`, `verify`, `list-devices`, `mapfile` and `analyze` print their result as one
 JSON object on a single line of stdout. All other messages (progress, per-pass lines, warnings) go
 to stderr, so stdout can be piped straight into `jq` or a script:
 
@@ -175,8 +175,9 @@ code 3.
 | `verify` | `image_blake3`, `image_sha256`, `image_hash` (`matches`, `changed` or `not_recorded`), `checked`, `failed`, `files[]` with `id`, `file`, `result` (`ok`, `mismatch` or `missing`), `exit_code` |
 | `list-devices` | `devices[]` with `path`, `size_bytes`, `removable` (true, false or null when unknown) |
 | `mapfile` | `path`, `sector_size`, `sector_count`, `replayed_records`, `skipped_records`, `recovered_bytes`, `bad_bytes`, `non_trimmed_bytes`, `untested_bytes`, `bad_runs[]` with `start_sector`, `sectors` |
+| `analyze` | `image`, `partitions[]` with `index`, `type`, `start_lba`, `sectors`; `volumes[]` with `kind`, `offset`, `error`, `entries[]` (`path`, `is_dir`, `deleted`, `size`) and `extracted` (files written, or null) |
 
-`analyze` and `mapfile --export` have no JSON form: with `--json` they exit with code 2. Fields
+`mapfile --export` has no JSON form: with `--json` it exits with code 2. Fields
 may be added in later versions; do not rely on a fixed set of keys.
 
 ## The Windows GUI
