@@ -423,44 +423,68 @@ pub struct ZipWalk {
     pub cd_ok: bool,
 }
 
+/// Most end-of-central-directory candidates examined before settling for the first one.
+const MAX_EOCD_CANDIDATES: usize = 64;
+
 pub fn walk_zip(d: &[u8]) -> ZipWalk {
-    let mut w = ZipWalk::default();
-    if d.len() < 22 || &d[..4] != b"PK\x03\x04" {
-        return w;
+    if d.len() < 22 || &d[..4] != b"PK" {
+        return ZipWalk::default();
     }
-    // The first end-of-central-directory signature after the local header closes this archive.
-    let Some(eocd) = find(&d[4..], b"PK\x05\x06").map(|x| x + 4) else {
-        return w;
-    };
+    // A stored (uncompressed) archive inside this one carries its own end record, so the first
+    // `PK` is not necessarily ours. Prefer the first whose central directory is
+    // consistent; if none is, fall back to the first candidate that fits.
+    let mut first_fit: Option<ZipWalk> = None;
+    let mut from = 4usize;
+    for _ in 0..MAX_EOCD_CANDIDATES {
+        let Some(rel) = find(&d[from..], b"PK") else {
+            break;
+        };
+        let eocd = from + rel;
+        from = eocd + 1;
+        let Some(w) = zip_at(d, eocd) else { continue };
+        if w.cd_ok {
+            return w;
+        }
+        first_fit.get_or_insert(w);
+    }
+    first_fit.unwrap_or_default()
+}
+
+/// Reads the end-of-central-directory record at `eocd`, if it fits inside `d`.
+fn zip_at(d: &[u8], eocd: usize) -> Option<ZipWalk> {
     if eocd + 22 > d.len() {
-        return w;
+        return None;
     }
     let comment = usize::from(u16::from_le_bytes([d[eocd + 20], d[eocd + 21]]));
     let end = eocd + 22 + comment;
     if end > d.len() {
-        return w;
+        return None;
     }
-    w.eocd = Some(eocd);
-    w.end = Some(end);
+    let mut w = ZipWalk {
+        eocd: Some(eocd),
+        end: Some(end),
+        ..ZipWalk::default()
+    };
     w.cd_size = u32::from_le_bytes([d[eocd + 12], d[eocd + 13], d[eocd + 14], d[eocd + 15]]);
     w.cd_offset = u32::from_le_bytes([d[eocd + 16], d[eocd + 17], d[eocd + 18], d[eocd + 19]]);
     let cd = w.cd_offset as usize;
     w.cd_ok = cd
         .checked_add(w.cd_size as usize)
         .is_some_and(|e| e <= eocd)
-        && d.get(cd..cd + 4) == Some(b"PK\x01\x02");
-    w
+        && d.get(cd..cd + 4) == Some(b"PK");
+    Some(w)
 }
 
-/// Every offset at which `needle` occurs in `hay`, ascending.
-pub(crate) fn find_all(hay: &[u8], needle: &[u8]) -> Vec<usize> {
-    let mut out = Vec::new();
+/// Every offset at which `needle` occurs in `hay`, ascending. Lazy, so scanning a large image
+/// does not first collect every hit of a short signature such as `BM` into memory.
+pub(crate) fn find_all<'a>(hay: &'a [u8], needle: &'a [u8]) -> impl Iterator<Item = usize> + 'a {
     let mut from = 0usize;
-    while let Some(rel) = find(&hay[from..], needle) {
-        out.push(from + rel);
-        from += rel + 1;
-    }
-    out
+    std::iter::from_fn(move || {
+        let rel = find(hay.get(from..)?, needle)?;
+        let at = from + rel;
+        from = at + 1;
+        Some(at)
+    })
 }
 
 /// First occurrence of `needle` in `hay`.
@@ -566,6 +590,51 @@ mod tests {
         d.extend_from_slice(&[0, 0]); // comment length
         let w = walk_zip(&d);
         assert_eq!(w.eocd, Some(eocd));
+        assert_eq!(w.end, Some(d.len()));
+        assert!(w.cd_ok);
+    }
+
+    /// A minimal archive: local header, one central directory entry, end record.
+    fn tiny_zip(prefix_len: usize) -> Vec<u8> {
+        let mut d = b"PK".to_vec();
+        d.extend_from_slice(&[0u8; 26]);
+        let cd_off = (d.len() + prefix_len) as u32;
+        d.extend_from_slice(b"PK");
+        d.extend_from_slice(&[0u8; 42]);
+        let cd_size = (d.len() + prefix_len) as u32 - cd_off;
+        d.extend_from_slice(b"PK");
+        d.extend_from_slice(&[0u8; 4]);
+        d.extend_from_slice(&[1, 0, 1, 0]);
+        d.extend_from_slice(&cd_size.to_le_bytes());
+        d.extend_from_slice(&cd_off.to_le_bytes());
+        d.extend_from_slice(&[0, 0]);
+        d
+    }
+
+    #[test]
+    fn zip_with_a_stored_zip_inside_ends_at_the_outer_record() {
+        let inner = tiny_zip(0);
+        // Outer archive: local header + stored inner archive, then its own directory and end.
+        let mut d = b"PK".to_vec();
+        d.extend_from_slice(&[0u8; 26]);
+        d.extend_from_slice(&inner);
+        let cd_off = d.len() as u32;
+        d.extend_from_slice(b"PK");
+        d.extend_from_slice(&[0u8; 42]);
+        let cd_size = d.len() as u32 - cd_off;
+        let eocd = d.len();
+        d.extend_from_slice(b"PK");
+        d.extend_from_slice(&[0u8; 4]);
+        d.extend_from_slice(&[1, 0, 1, 0]);
+        d.extend_from_slice(&cd_size.to_le_bytes());
+        d.extend_from_slice(&cd_off.to_le_bytes());
+        d.extend_from_slice(&[0, 0]);
+        let w = walk_zip(&d);
+        assert_eq!(
+            w.eocd,
+            Some(eocd),
+            "must skip the inner archive's end record"
+        );
         assert_eq!(w.end, Some(d.len()));
         assert!(w.cd_ok);
     }

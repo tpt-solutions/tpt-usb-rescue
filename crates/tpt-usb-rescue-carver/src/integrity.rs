@@ -21,6 +21,11 @@ pub fn digest(data: &[u8]) -> Digests {
     }
 }
 
+/// SHA-256 of `data` as lowercase hex.
+pub fn sha256_hex(data: &[u8]) -> String {
+    hex(&Sha256::digest(data))
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -51,6 +56,15 @@ pub fn verify_output(image: &[u8], dir: &Path) -> io::Result<Vec<VerifyRow>> {
 fn verify_row(image: &[u8], dir: &Path, row: &IndexRow) -> VerifyRow {
     let outcome = match fs::read(dir.join(&row.file)) {
         Err(_) => Outcome::Missing,
+        // A recorded digest must still match the carved file, and the file the image range.
+        Ok(carved)
+            if row
+                .sha256
+                .as_deref()
+                .is_some_and(|h| h != sha256_hex(&carved)) =>
+        {
+            Outcome::Mismatch
+        }
         Ok(carved) => match image.get(row.start_offset as usize..row.end_offset as usize) {
             Some(range) if range == carved.as_slice() => Outcome::Match,
             _ => Outcome::Mismatch,

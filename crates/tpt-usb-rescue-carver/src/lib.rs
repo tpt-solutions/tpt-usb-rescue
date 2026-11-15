@@ -49,6 +49,11 @@ impl Default for CarveOptions {
     }
 }
 
+/// Longest stretch carved for a file whose end cannot be found. Formats without an end marker
+/// (TIFF, MP3, FLAC, MKV, GZIP, PSD) otherwise run to the next header or the type's maximum,
+/// so one false-positive header could write gigabytes. Files that close are not limited by this.
+const MAX_UNTERMINATED_BYTES: usize = 256 << 20;
+
 /// Whether the secondary check of a signature (e.g. "WEBP" inside RIFF) matches at `hit`.
 fn check_ok(data: &[u8], hit: usize, sig: &Signature) -> bool {
     match sig.check_at {
@@ -65,7 +70,6 @@ pub fn carve(data: &[u8], opts: &CarveOptions, validator: &dyn MediaValidator) -
         .iter()
         .flat_map(|sig| {
             signature::find_all(data, sig.header)
-                .into_iter()
                 .filter(move |&o| check_ok(data, o, sig))
                 .filter(move |&o| o >= sig.start_adjust)
                 .map(move |o| (o - sig.start_adjust, sig))
@@ -92,7 +96,9 @@ pub fn carve(data: &[u8], opts: &CarveOptions, validator: &dyn MediaValidator) -
                     .map(|(offset, _)| *offset)
                     .find(|offset| *offset > start)
                     .unwrap_or(data.len());
-                max_end.min(next_header)
+                max_end
+                    .min(next_header)
+                    .min(start.saturating_add(MAX_UNTERMINATED_BYTES))
             }
         };
         let score = validator.validate(sig.file_type, &data[start..end]);
