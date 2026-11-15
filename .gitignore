@@ -1,5 +1,8 @@
 /target
 *.img
+# ...except the small fixtures that tests, examples and the fuzzers rely on.
+!/examples/practice-fat32.img
+!/fuzz/seeds/**/*.img
 *.map
 Cargo.lock.bak
 
