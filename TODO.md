@@ -28,7 +28,7 @@
 - [x] Pass 3: trimming bad-block edges (NonTrimmed -> exact boundary)
 - [x] Deterministic state machine; resume after kill (`--resume`)
 - [x] Zero-fill unrecoverable sectors, keep byte alignment
-- [ ] 5s read timeout + USB controller reset (SCSI/ATA) (5 s timeout done: reads run on a reader thread and a timed-out read counts as a media failure; the controller reset is not implemented)
+- [x] 5s read timeout + USB reset (5 s timeout: reads run on a reader thread and a timed-out read counts as a media failure. Reset, Linux only: the USB device behind the disk is re-enumerated through sysfs `authorized`, which needs root. This is device re-enumeration, not a controller reset, and it has not been run on hardware)
 - [x] Device-disconnect detection, clean handle close
 - [x] `mapfile` subcommand: inspect, export to TOML / ddrescue format
 - [x] Fault-injection block-device harness for tests (in-memory device with injected bad sectors, hangs and disconnects)
@@ -58,7 +58,7 @@
 
 ## 6. Edge cases (spec section 9)
 - [x] Disconnect mid-read -> instant resume (tested: device removed mid-pass 1, resumed from the mapfile)
-- [ ] Firmware lockup -> timeout + reset (timeout done and tested; the reset is not implemented)
+- [x] Firmware lockup -> timeout + reset (timeout tested; reset is the Linux sysfs re-enumeration above, untested on hardware; the run stops after a reset, so resume afterwards)
 - [x] False-positive signatures rejected by validation
 - [x] Fragmented files (contiguous only in v1; `is_fragmented` is always false)
 

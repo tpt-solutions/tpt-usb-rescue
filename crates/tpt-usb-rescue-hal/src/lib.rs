@@ -13,6 +13,7 @@ pub mod safety;
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+pub mod usb_reset;
 #[cfg(windows)]
 mod windows;
 
@@ -146,6 +147,21 @@ pub fn open_device(path: &Path) -> Result<FileDevice, HalError> {
         })
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        let _ = path;
+        Err(HalError::Unsupported)
+    }
+}
+
+/// Re-enumerates the USB device behind a block device so a hung controller or firmware can
+/// recover. Linux only, and needs root. After a successful reset the open handle is invalid, so
+/// the caller should stop the run and resume it later.
+pub fn reset_device(path: &Path) -> Result<(), HalError> {
+    #[cfg(target_os = "linux")]
+    {
+        linux::reset_usb_device(path)
+    }
+    #[cfg(not(target_os = "linux"))]
     {
         let _ = path;
         Err(HalError::Unsupported)

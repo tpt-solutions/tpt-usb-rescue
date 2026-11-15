@@ -107,6 +107,9 @@ enum Read {
 /// Callback invoked with the current totals after each checkpoint.
 pub type ProgressHook = Box<dyn FnMut(&Totals)>;
 
+/// Callback invoked when a read times out. Receives the first sector of the stuck read.
+pub type ResetHook = Box<dyn FnMut(u64) -> Result<(), String>>;
+
 struct ReadRequest {
     offset: u64,
     len: usize,
@@ -171,6 +174,8 @@ pub struct Engine<D: RawDevice + Send + Sync + 'static> {
     out: OutputImage,
     cfg: EngineConfig,
     progress: Option<ProgressHook>,
+    reset_hook: Option<ResetHook>,
+    last_reset_error: Option<String>,
 }
 
 impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
@@ -205,6 +210,8 @@ impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
             out,
             cfg,
             progress: None,
+            reset_hook: None,
+            last_reset_error: None,
         })
     }
 
@@ -242,6 +249,17 @@ impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
             hook(&self.map.totals());
         }
         Ok(())
+    }
+
+    /// Registers a hook called when a read times out, before the reader is replaced. Used to reset
+    /// the USB device. The hook receives the sector that timed out.
+    pub fn set_reset_hook(&mut self, hook: ResetHook) {
+        self.reset_hook = Some(hook);
+    }
+
+    /// The last error returned by the reset hook, if any.
+    pub fn last_reset_error(&self) -> Option<&str> {
+        self.last_reset_error.as_deref()
     }
 
     /// Registers a callback invoked after every checkpoint with the current totals.
@@ -349,6 +367,11 @@ impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
                 ReaderOutcome::Done(Ok((buf, bytes))) => return Ok(Read::Ok { buf, bytes }),
                 ReaderOutcome::Done(Err(err)) => err,
                 ReaderOutcome::TimedOut => {
+                    if let Some(hook) = self.reset_hook.as_mut() {
+                        if let Err(e) = hook(start) {
+                            self.last_reset_error = Some(e);
+                        }
+                    }
                     // The read is stuck inside the device. Leave that thread to finish on its
                     // own and continue with a fresh reader.
                     self.reader = Reader::spawn(Arc::clone(&self.dev));
@@ -607,6 +630,31 @@ mod tests {
         assert_eq!(&img[..40 * 512], &data[..40 * 512]);
         assert!(img[40 * 512..41 * 512].iter().all(|&b| b == 0));
         assert_eq!(&img[41 * 512..], &data[41 * 512..]);
+    }
+
+    #[test]
+    fn timed_out_read_calls_the_reset_hook() {
+        let data = pattern(16, 512);
+        let mut dev = MockDev::new(data, HashSet::new());
+        dev.hang = [3u64].into_iter().collect();
+        dev.hang_for = Duration::from_millis(600);
+        let map = Mapfile::open_or_create(&tmp("reset.map"), 512, 16).unwrap();
+        let out = OutputImage::create(&tmp("reset.img"), 16 * 512).unwrap();
+        let cfg = EngineConfig {
+            read_timeout: Duration::from_millis(100),
+            ..cfg_small()
+        };
+        let mut eng = Engine::new(Arc::new(dev), map, out, cfg).unwrap();
+        let calls = Arc::new(AtomicU64::new(0));
+        let seen = Arc::clone(&calls);
+        eng.set_reset_hook(Box::new(move |sector| {
+            assert_eq!(sector, 0);
+            seen.fetch_add(1, Ordering::SeqCst);
+            Err("no root".to_string())
+        }));
+        eng.run_pass(1).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(eng.last_reset_error(), Some("no root"));
     }
 
     #[test]

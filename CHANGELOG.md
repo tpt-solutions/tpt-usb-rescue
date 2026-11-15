@@ -8,7 +8,7 @@ uses semantic versioning once 1.0.0 is released.
 ### Added
 - Carver covers the top 20 file types, with structural end detection and validators.
 - NTFS parser in `tpt-usb-rescue-fs` (MFT records, run lists, deleted records); detection and listing of NTFS volumes.
-- macOS HAL (`/dev/rdiskN`, `F_NOCACHE`, DKIOC geometry): type-checked for macOS, not run on a Mac.`r`n- 5 s read timeout in the imager: reads run on a reader thread and a timed-out read is treated as a media failure.
+- macOS HAL (`/dev/rdiskN`, `F_NOCACHE`, DKIOC geometry): type-checked for macOS, not run on a Mac.`r`n- USB device reset on Linux through sysfs `authorized` (needs root), called from the engine when a read times out.`r`n- 5 s read timeout in the imager: reads run on a reader thread and a timed-out read is treated as a media failure.
 - `deny.toml` license, ban and source policy; benchmarks; cargo-fuzz targets; library examples.
 - `tpt-usb-rescue-gui`: Windows GUI built on the Win32 API with no third-party dependencies. Runs image, carve, verify and analyze on worker threads, with a progress bar and log.
 - Shared operations moved into `tpt_usb_rescue::ops` so the CLI and GUI use the same code path.
@@ -36,7 +36,7 @@ uses semantic versioning once 1.0.0 is released.
 ### Known limitations
 - Hardware paths (Linux and Windows device reads, device listing) are compiled and reviewed but
   have not been run against physical USB media yet.
-- No USB controller reset yet. Reads time out after 5 s, so a hung device no longer stalls the run, but the device itself is not reset.
+- Reads time out after 5 s. On Linux a timed-out read re-enumerates the USB device (needs root); this is not yet tested on hardware, and Windows has no reset.
 
 
 ## [0.1.0] - 2026-11-14

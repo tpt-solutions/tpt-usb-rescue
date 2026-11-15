@@ -145,3 +145,13 @@ mod tests {
         assert_eq!(split_dev(encoded), (259, 1000));
     }
 }
+
+/// Re-enumerates the USB device behind `device` (for example `/dev/sdb`). Needs root. The open
+/// handle is invalid afterwards, so the caller should stop and resume later.
+pub(crate) fn reset_usb_device(device: &Path) -> Result<(), HalError> {
+    let name = device
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| HalError::InvalidArgument("device path has no name".into()))?;
+    crate::usb_reset::reset_block_device(Path::new("/sys"), name)
+}

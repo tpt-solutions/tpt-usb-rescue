@@ -52,7 +52,7 @@ pub fn image(req: &ImageRequest, out: &mut dyn Write, progress: Option<ProgressH
     check_output(&req.device, &req.output)?;
     if is_file {
         let dev = Arc::new(open_image(&req.device)?);
-        run_image(dev, req, out, progress)?;
+        run_image(dev, req, out, progress, None)?;
         // Regular files are not sector multiples in general; keep the exact source length.
         let len = fs::metadata(&req.device)?.len();
         OpenOptions::new()
@@ -63,7 +63,7 @@ pub fn image(req: &ImageRequest, out: &mut dyn Write, progress: Option<ProgressH
     } else {
         check_not_system_disk(&req.device, req.allow_system_disk)?;
         let dev = Arc::new(open_device(&req.device)?);
-        run_image(dev, req, out, progress)
+        run_image(dev, req, out, progress, Some(req.device.clone()))
     }
 }
 
@@ -72,6 +72,7 @@ fn run_image<D: RawDevice + Send + Sync + 'static>(
     req: &ImageRequest,
     out: &mut dyn Write,
     progress: Option<ProgressHook>,
+    reset_device: Option<PathBuf>,
 ) -> OpResult {
     let geo = dev.geometry()?;
     let total = geo.sector_count * u64::from(geo.sector_size);
@@ -99,6 +100,11 @@ fn run_image<D: RawDevice + Send + Sync + 'static>(
     };
 
     let mut engine = Engine::new(dev, map, image, EngineConfig::default())?;
+    if let Some(device) = reset_device {
+        engine.set_reset_hook(Box::new(move |_sector| {
+            tpt_usb_rescue_hal::reset_device(&device).map_err(|e| e.to_string())
+        }));
+    }
     if let Some(hook) = progress {
         engine.set_progress_hook(hook);
     }
@@ -120,6 +126,9 @@ fn run_image<D: RawDevice + Send + Sync + 'static>(
             }
             Err(e) => return Err(e.into()),
         }
+    }
+    if let Some(e) = engine.last_reset_error() {
+        writeln!(out, "USB reset failed: {e}")?;
     }
     engine.finish()?;
     writeln!(out, "image written to {}", req.output.display())?;
