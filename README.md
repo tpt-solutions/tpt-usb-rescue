@@ -50,6 +50,12 @@ need a window started as Administrator.
 | `tpt-usb-rescue-fs` | FAT32, exFAT and NTFS parsers, volume detection |
 | `tpt-usb-rescue` | CLI |
 
+## Documentation
+
+- [Usage](docs/USAGE.md): imaging, resume, carving, analysis, verification and the GUI
+- [Architecture](docs/ARCHITECTURE.md): crates, mapfile format, carving and filesystem design, safety model
+- [Supported formats](docs/FORMATS.md): the 20 carved types and the filesystems read
+- [Release notes draft for 1.0.0](docs/release/1.0.0-DRAFT.md) (not published)
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues as described in [SECURITY.md](SECURITY.md).
 

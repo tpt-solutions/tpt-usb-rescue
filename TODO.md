@@ -47,8 +47,8 @@
 - [x] BLAKE3/SHA-256 hashing (blake3 + sha2 crates) of image and carved files
 - [x] `verify` subcommand
 - [x] `analyze` subcommand
-- [ ] Docs, examples, release notes (README, CHANGELOG, two library examples and benchmarks are done; the 1.0 release notes are written at release time)
-- [ ] Deliverable: v1.0.0
+- [x] Docs, examples, release notes (docs/USAGE.md, docs/ARCHITECTURE.md, docs/FORMATS.md; two library examples; benchmarks; 1.0.0 release-notes draft in docs/release/)
+- [ ] Deliverable: v1.0.0 (release notes drafted, with the release gate and publishing steps in docs/release/1.0.0-DRAFT.md; blocked on hardware checks and on publishing, which is not done)
 
 ## 5. tpt-usb-rescue-fs
 - [x] FAT32 parser (cluster chains, directory tree, LFN, deleted entries)
