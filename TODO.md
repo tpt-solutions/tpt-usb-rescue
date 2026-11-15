@@ -5,7 +5,7 @@
 - [x] Dual license files (MIT OR Apache-2.0, TPT Solutions)
 - [x] CLI skeleton (image, carve, analyze, verify, list-devices, mapfile)
 - [x] CI workflow (Linux + Windows, fmt/clippy/test, MSRV)
-- [ ] Confirm real repository URL in workspace Cargo.toml (URL is `github.com/tpt-solutions/tpt-usb-rescue`; needs owner confirmation)
+- [x] Confirm real repository URL in workspace Cargo.toml (`https://github.com/tpt-solutions/tpt-usb-rescue`, confirmed by the owner)
 - [x] `git init`, first commit
 - [x] CONTRIBUTING.md, SECURITY.md, CHANGELOG.md
 - [x] Windows GUI (`tpt-usb-rescue-gui`): Win32 window, no third-party dependencies
