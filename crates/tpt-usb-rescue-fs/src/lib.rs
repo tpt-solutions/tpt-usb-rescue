@@ -206,6 +206,18 @@ pub(crate) fn slice(image: &[u8], start: usize, len: usize) -> Result<&[u8], FsE
         .ok_or(FsError::OutOfBounds(start as u64))
 }
 
+/// Writes `bytes` to `fuzz/seeds/<target>/valid.img`, a starting point for the fuzz targets.
+/// Random input almost never forms a valid boot sector, so without seeds the fuzzers spend their
+/// time on the "reject" path and never reach directory or run-list parsing.
+#[cfg(test)]
+pub(crate) fn write_fuzz_seed(target: &str, bytes: &[u8]) {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fuzz/seeds")
+        .join(target);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("valid.img"), bytes).unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

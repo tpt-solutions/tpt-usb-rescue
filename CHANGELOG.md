@@ -16,6 +16,7 @@ uses semantic versioning once 1.0.0 is released.
 - exFAT directories stored without a FAT chain are read in full; backup boot sectors are no longer reported as volumes; NTFS, FAT32 and exFAT parsers use checked arithmetic and bounded allocations.
 - The carver picks the right end record for ZIPs that contain stored ZIPs and caps files with no end marker at 256 MiB.
 - `verify` rejects `index.csv` entries that name files outside the output folder; `mapfile --out` never overwrites.
+- exFAT and FAT32: a cluster only exists if it lies inside the image, so a corrupt cluster count can no longer make a huge allocation (found by fuzzing the exFAT parser from a valid seed).
 - FAT32: long names are only used when their checksum matches the short entry that follows, and deleted multi-piece names keep their order.
 
 ### Added

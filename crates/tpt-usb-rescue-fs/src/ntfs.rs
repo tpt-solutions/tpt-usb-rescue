@@ -679,3 +679,13 @@ mod tests {
         assert!(fs.entries().iter().all(|e| e.path != "/HELLO.TXT"));
     }
 }
+
+/// Regenerate the fuzz seed: `cargo test -p tpt-usb-rescue-fs write_fuzz_seed -- --ignored`.
+#[cfg(test)]
+mod seed {
+    #[test]
+    #[ignore = "writes into fuzz/seeds"]
+    fn write_fuzz_seed() {
+        crate::write_fuzz_seed("ntfs", &crate::ntfs::test_image::build());
+    }
+}

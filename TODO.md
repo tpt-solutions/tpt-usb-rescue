@@ -87,7 +87,7 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 - [x] Stop after 10 consecutive timed-out reads (no more leaked reader threads); USB reset fires once per hang (tested)
 - [x] exFAT NoFatChain directories read beyond the first cluster (tested)
 - [x] NTFS/FAT32/exFAT: checked arithmetic and allocation caps on hostile input
-- [ ] Run the fuzz targets again with overflow checks (debug build) after the fs hardening
+- [x] Fuzz targets re-run with overflow checks and valid seed volumes (`fuzz/seeds`, `fuzz/README.md`). The first seeded run found an exFAT out-of-memory (cluster count larger than the image), fixed with a regression test. Unseeded runs had covered only ~30 edges and found nothing
 - [x] `detect()` ignores backup boot sectors (tested)
 - [x] Mapfile: a damaged record in the middle is skipped (later records kept, user warned); failed writes roll back; `u32::MAX` clamp removed (tested)
 - [x] Carver: ZIP walk picks the end record with a consistent directory (stored inner ZIPs; tested); files with no end marker are capped at 256 MiB; `find_all` is lazy
