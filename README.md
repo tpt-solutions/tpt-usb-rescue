@@ -83,7 +83,7 @@ need a window started as Administrator.
 - [Supported formats](docs/FORMATS.md): the 20 carved types and the filesystems read
 - [Release notes draft for 1.0.0](docs/release/1.0.0-DRAFT.md) (not published)
 ## Contributing
-See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues as described in [SECURITY.md](SECURITY.md).
+Contributions are handled through GitHub issues only; pull requests are not accepted. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 Licensed under either of [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your option.

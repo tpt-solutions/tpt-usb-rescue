@@ -5,8 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting. Please do **not** attach files recovered from private drives, and do
-        not report security problems here: see SECURITY.md instead.
+        Thanks for reporting. Please do **not** attach files recovered from private drives.
   - type: textarea
     id: what
     attributes:

@@ -100,4 +100,3 @@ The release files are not code-signed, so SmartScreen may warn. Check the downlo
 
 Open an issue on GitHub and include: the exact command, the tool version (`--version`), your
 operating system, and the output. Do not post file contents recovered from private drives.
-For security problems, follow [SECURITY.md](../SECURITY.md) instead.
