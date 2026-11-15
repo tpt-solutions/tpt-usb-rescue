@@ -452,3 +452,38 @@ fn carve_index_records_a_sha256_per_file() {
     }
     assert!(rows > 0);
 }
+
+#[test]
+fn completions_are_generated_for_each_shell() {
+    for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+        let r = run([os("completions"), os(shell)]);
+        assert_eq!(r.status.code(), Some(0), "{shell}");
+        let text = String::from_utf8_lossy(&r.stdout).to_string();
+        assert!(text.contains("list-devices"), "{shell}: {text}");
+    }
+    assert_eq!(run([os("completions"), os("nope")]).status.code(), Some(2));
+}
+
+#[test]
+fn man_pages_are_written_one_per_command() {
+    let stdout = run([os("man")]);
+    assert_eq!(stdout.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&stdout.stdout).contains(".TH tpt-usb-rescue 1"));
+
+    let dir = workdir("man").join("pages");
+    let r = run([os("man"), os("--out-dir"), os(&dir)]);
+    assert_eq!(r.status.code(), Some(0));
+    for page in [
+        "tpt-usb-rescue.1",
+        "tpt-usb-rescue-image.1",
+        "tpt-usb-rescue-verify.1",
+    ] {
+        assert!(dir.join(page).exists(), "{page}");
+    }
+    assert!(!dir.join("tpt-usb-rescue-help.1").exists());
+    let image = fs::read_to_string(dir.join("tpt-usb-rescue-image.1")).unwrap();
+    assert!(
+        image.contains("chunk") && image.contains("timeout"),
+        "options belong on the page"
+    );
+}

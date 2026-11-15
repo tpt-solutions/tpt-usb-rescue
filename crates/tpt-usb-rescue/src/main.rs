@@ -1,7 +1,8 @@
 mod json;
 mod progress;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 use json::J;
 use progress::Progress;
 use std::error::Error;
@@ -103,6 +104,14 @@ enum Command {
     Verify { output_dir: PathBuf, image: PathBuf },
     /// List candidate block devices
     ListDevices,
+    /// Print a shell completion script (bash, zsh, fish, elvish or powershell)
+    Completions { shell: Shell },
+    /// Print the manual page (roff) to stdout, or write one page per command to a folder
+    Man {
+        /// Write tpt-usb-rescue.1 and tpt-usb-rescue-<command>.1 here instead of printing.
+        #[arg(long, value_name = "DIR")]
+        out_dir: Option<PathBuf>,
+    },
     /// Inspect or export a mapfile
     Mapfile {
         mapfile: PathBuf,
@@ -341,6 +350,20 @@ fn run(cmd: Command, quiet: bool, json: bool) -> CliResult {
             }
             Ok(code)
         }
+        Command::Completions { shell } => {
+            let mut cmd = Cli::command();
+            clap_complete::generate(shell, &mut cmd, "tpt-usb-rescue", &mut std::io::stdout());
+            Ok(exit::OK)
+        }
+        Command::Man { out_dir } => {
+            let mut cmd = Cli::command();
+            cmd.build(); // propagates the global options (--quiet, --json) to every command
+            match out_dir {
+                None => clap_mangen::Man::new(cmd).render(&mut std::io::stdout())?,
+                Some(dir) => write_man_pages(&cmd, &dir)?,
+            }
+            Ok(exit::OK)
+        }
         Command::ListDevices => {
             let devices = ops::list(&mut out)?;
             if json {
@@ -405,6 +428,28 @@ fn run(cmd: Command, quiet: bool, json: bool) -> CliResult {
             ops::mapfile_report(&mapfile, export, dest.as_deref(), &mut out).map(|()| exit::OK)
         }
     }
+}
+
+/// Writes `tpt-usb-rescue.1` and one `tpt-usb-rescue-<command>.1` per command into `dir`.
+fn write_man_pages(cmd: &clap::Command, dir: &Path) -> Result<(), Box<dyn Error>> {
+    std::fs::create_dir_all(dir)?;
+    let mut main = Vec::new();
+    clap_mangen::Man::new(cmd.clone()).render(&mut main)?;
+    std::fs::write(dir.join("tpt-usb-rescue.1"), main)?;
+    for sub in cmd
+        .get_subcommands()
+        .filter(|s| !s.is_hide_set() && s.get_name() != "help")
+    {
+        // The page title is the command name, so give it the full "tpt-usb-rescue-image" form.
+        // Leaking one short string per command is fine in a run that exits right after.
+        let name: &'static str =
+            Box::leak(format!("tpt-usb-rescue-{}", sub.get_name()).into_boxed_str());
+        let mut page = Vec::new();
+        clap_mangen::Man::new(sub.clone().name(name).version(env!("CARGO_PKG_VERSION")))
+            .render(&mut page)?;
+        std::fs::write(dir.join(format!("{name}.1")), page)?;
+    }
+    Ok(())
 }
 
 /// `--json` was given to a command that has no JSON form. Reported as a usage error.

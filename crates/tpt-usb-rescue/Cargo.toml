@@ -17,6 +17,8 @@ workspace = true
 [dependencies]
 clap.workspace = true
 ctrlc.workspace = true
+clap_complete.workspace = true
+clap_mangen.workspace = true
 memmap2.workspace = true
 tpt-usb-rescue-hal.workspace = true
 tpt-usb-rescue-imager.workspace = true
