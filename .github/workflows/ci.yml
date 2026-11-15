@@ -59,6 +59,10 @@ jobs:
   # The fuzz targets are not run here, only built, so they cannot rot unnoticed.
   fuzz-build:
     runs-on: ubuntu-latest
+    # The root rust-toolchain.toml pins stable, which would override the nightly
+    # installed below; cargo-fuzz needs nightly for -Zsanitizer.
+    env:
+      RUSTUP_TOOLCHAIN: nightly
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
