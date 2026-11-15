@@ -63,11 +63,19 @@ impl<'a> Fat32<'a> {
         })
     }
 
+    /// Byte offset of cluster `c`, if the cluster exists and lies entirely inside the image.
+    ///
+    /// The boot sector's cluster count is untrusted: a corrupt one can claim hundreds of millions
+    /// of clusters, so a cluster is only real if its bytes are really there. This also bounds
+    /// every run of clusters built from a stored size.
     fn cluster_abs(&self, c: u32) -> Option<usize> {
         if c < 2 || c - 2 >= self.cluster_count {
             return None;
         }
-        Some(self.data_offset + (c - 2) as usize * self.cluster_bytes)
+        let off = self
+            .data_offset
+            .checked_add((c - 2) as usize * self.cluster_bytes)?;
+        (off.checked_add(self.cluster_bytes)? <= self.img.len()).then_some(off)
     }
 
     fn next(&self, c: u32) -> Option<u32> {
@@ -558,5 +566,15 @@ mod fuzz_tests {
             }
             let _ = crate::detect(&img);
         }
+    }
+}
+
+/// Regenerate the fuzz seed: `cargo test -p tpt-usb-rescue-fs write_fuzz_seed -- --ignored`.
+#[cfg(test)]
+mod seed {
+    #[test]
+    #[ignore = "writes into fuzz/seeds"]
+    fn write_fuzz_seed() {
+        crate::write_fuzz_seed("fat32", &crate::fat32::test_image::build());
     }
 }

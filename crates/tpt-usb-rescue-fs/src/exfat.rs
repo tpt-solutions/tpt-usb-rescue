@@ -68,11 +68,19 @@ impl<'a> ExFat<'a> {
         })
     }
 
+    /// Byte offset of cluster `c`, if the cluster exists and lies entirely inside the image.
+    ///
+    /// The boot sector's cluster count is untrusted: a corrupt one can claim hundreds of millions
+    /// of clusters, so a cluster is only real if its bytes are really there. This also bounds
+    /// every run of clusters built from a stored size.
     fn cluster_abs(&self, c: u32) -> Option<usize> {
         if c < 2 || c - 2 >= self.cluster_count {
             return None;
         }
-        Some(self.heap_offset + (c - 2) as usize * self.cluster_bytes)
+        let off = self
+            .heap_offset
+            .checked_add((c - 2) as usize * self.cluster_bytes)?;
+        (off.checked_add(self.cluster_bytes)? <= self.img.len()).then_some(off)
     }
 
     fn next(&self, c: u32) -> Option<u32> {
@@ -95,7 +103,8 @@ impl<'a> ExFat<'a> {
     }
 
     fn run(&self, start: u32, bytes: u64) -> Vec<u32> {
-        let n = bytes.div_ceil(self.cluster_bytes as u64) as u32;
+        // A stored size beyond 2^32 clusters must not wrap around to a short run.
+        let n = u32::try_from(bytes.div_ceil(self.cluster_bytes as u64)).unwrap_or(u32::MAX);
         (0..n)
             .map(|i| start.saturating_add(i))
             .take_while(|c| self.cluster_abs(*c).is_some())
@@ -247,7 +256,7 @@ mod tests {
     use super::*;
 
     /// 512-byte sectors, 1 sector per cluster. FAT at sector 2, heap at sector 4, root at cluster 2.
-    fn build() -> Vec<u8> {
+    pub(super) fn build() -> Vec<u8> {
         let mut img = vec![0u8; 64 * 512];
         let b = &mut img[..512];
         b[3..11].copy_from_slice(b"EXFAT   ");
@@ -337,6 +346,24 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_cluster_count_cannot_make_a_huge_run() {
+        let mut img = build();
+        // ClusterCount (offset 92) claims about 268 million clusters; the image holds 60.
+        img[92..96].copy_from_slice(&0x1000_0032u32.to_le_bytes());
+        let fs = ExFat::open(&img, 0).unwrap();
+        let run = fs.run(2, u64::MAX / 2);
+        assert!(
+            run.len() <= img.len() / 512,
+            "a run cannot hold more clusters than the image does: {}",
+            run.len()
+        );
+        // And the whole volume still parses without trouble.
+        for e in fs.entries() {
+            let _ = fs.read(&e);
+        }
+    }
+
+    #[test]
     fn reads_nofatchain_directory_beyond_first_cluster() {
         let img = build();
         let fs = ExFat::open(&img, 0).unwrap();
@@ -419,5 +446,15 @@ mod fuzz_tests {
                 }
             }
         }
+    }
+}
+
+/// Regenerate the fuzz seed: `cargo test -p tpt-usb-rescue-fs write_fuzz_seed -- --ignored`.
+#[cfg(test)]
+mod seed {
+    #[test]
+    #[ignore = "writes into fuzz/seeds"]
+    fn write_fuzz_seed() {
+        crate::write_fuzz_seed("exfat", &crate::exfat::tests::build());
     }
 }
