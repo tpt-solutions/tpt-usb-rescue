@@ -27,6 +27,7 @@ tpt-usb-rescue-imager = { path = "crates/tpt-usb-rescue-imager", version = "0.1.
 tpt-usb-rescue-carver = { path = "crates/tpt-usb-rescue-carver", version = "0.1.0" }
 tpt-usb-rescue-fs = { path = "crates/tpt-usb-rescue-fs", version = "0.1.0" }
 clap = { version = "4", features = ["derive"] }
+ctrlc = "3.5"
 thiserror = "2"
 memmap2 = "0.9"
 blake3 = "1"
@@ -40,3 +41,9 @@ unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "warn"
+
+# Smaller, faster release binaries for the GitHub Release downloads.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

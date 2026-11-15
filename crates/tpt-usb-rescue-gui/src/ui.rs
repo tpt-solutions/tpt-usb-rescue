@@ -689,6 +689,7 @@ fn start_copy() {
         pass: None,
         resume,
         allow_system_disk: win32::is_checked(c.sysdisk),
+        tuning: ops::Tuning::default(),
         cancel: Some(Arc::clone(&cancel)),
     };
     spawn(Job::Image(req), Some(cancel));

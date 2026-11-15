@@ -16,6 +16,7 @@ workspace = true
 
 [dependencies]
 clap.workspace = true
+ctrlc.workspace = true
 memmap2.workspace = true
 tpt-usb-rescue-hal.workspace = true
 tpt-usb-rescue-imager.workspace = true
@@ -24,3 +25,12 @@ tpt-usb-rescue-fs.workspace = true
 
 [dev-dependencies]
 crc32fast.workspace = true
+
+# Lets `cargo binstall tpt-usb-rescue` fetch the prebuilt archive from the GitHub Release.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/tpt-usb-rescue-v{ version }-{ target }{ archive-suffix }"
+bin-dir = "tpt-usb-rescue-v{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
