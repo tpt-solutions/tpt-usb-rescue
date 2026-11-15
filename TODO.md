@@ -149,6 +149,17 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 - [ ] Batch mode for repair shops (queue of devices, CSV/JSON summary)
 - [ ] ddrescue mapfile import and `--compare` of two runs
 
+## 14. Release 0.1.0-rc.1
+- [x] Version bumped to `0.1.0-rc.1` (workspace, path dependencies, both lockfiles); the release workflow's tag check passes for `v0.1.0-rc.1` and refuses `v0.1.0` and `v1.0.0`
+- [x] Release archive dry-run on Windows: unpacks, runs, and `recover.ps1` works from the unpacked folder
+- [x] `docs/release/TESTING.md` (what is and is not verified, hardware checklist) and `RELEASING.md` (process, rollback, promotion to 1.0.0)
+- [x] Real Linux block-device validation (`tools/linux-validate.sh`, 15 checks); it found and fixed the hung-area abort
+- [ ] Push the tag `v0.1.0-rc.1` to run the release workflow for the first time (not done; yours to do)
+- [ ] Hardware checks H1 to H7 in TESTING.md: real USB stick, real bad sectors, unplug and resume, USB reset, Windows drives and GUI, macOS
+- [ ] README status line: still says "pre-alpha" and "tested on synthetic data"; update it to match TESTING.md
+- [ ] Decide whether to publish to crates.io, and `publish` for the GUI crate
+- [ ] A CI job for `tools/linux-validate.sh` (needs a runner with device-mapper `delay`; untried)
+
 ## Decisions
 - No external `tpt-*` crates (tpt-media, tpt-math, tpt-archon). Validation and hashing are implemented in-repo / with generic crates (blake3, sha2, memmap2).
 - Dependency licenses: a crate is accepted when one of its licenses is permissive and listed in `deny.toml`. Crates offered only under Apache-2.0 are rejected.
