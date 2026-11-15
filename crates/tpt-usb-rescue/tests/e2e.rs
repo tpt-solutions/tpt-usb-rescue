@@ -430,7 +430,15 @@ fn json_errors_and_unsupported_commands() {
     assert!(text.starts_with(r#"{"ok":false,"error":""#), "{text}");
     assert!(text.contains(r#""interrupted":false"#));
 
-    let a = run([os("--json"), os("analyze"), os(dir.join("x.img"))]);
+    let a = run([
+        os("--json"),
+        os("mapfile"),
+        os(dir.join("x.map")),
+        os("--export"),
+        os("ddrescue"),
+        os("--out"),
+        os(dir.join("x.ddr")),
+    ]);
     assert_eq!(a.status.code(), Some(2));
     assert!(a.stdout.is_empty());
     assert!(String::from_utf8_lossy(&a.stderr).contains("not supported"));
@@ -520,4 +528,174 @@ fn practice_filesystem_image_extracts_its_files() {
     );
     // A deleted entry loses its first character on a FAT volume, and is marked by the prefix.
     assert_eq!(fs::read(vol.join("DELETED__ECRET.DAT")).unwrap().len(), 300);
+}
+
+/// Copies a practice image into a fresh work folder and returns its path.
+fn practice_copy(name: &str, image: &str) -> PathBuf {
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples")
+        .join(image);
+    let dir = workdir(name);
+    let dst = dir.join(image);
+    fs::copy(&src, &dst).unwrap();
+    dst
+}
+
+#[test]
+fn practice_exfat_image_extracts_its_files() {
+    let img = practice_copy("practice-exfat", "practice-exfat.img");
+    let dir = img.parent().unwrap().to_path_buf();
+    let r = run([
+        os("analyze"),
+        os(&img),
+        os("--extract"),
+        os(dir.join("vol")),
+    ]);
+    assert_eq!(
+        r.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+    let text = String::from_utf8_lossy(&r.stdout).to_string();
+    assert!(
+        text.contains("exFAT at byte offset 0") && text.contains("1 deleted"),
+        "{text}"
+    );
+
+    let vol = dir.join("vol").join("volume_0");
+    assert_eq!(fs::read(vol.join("big").join("deep.txt")).unwrap(), b"deep");
+    assert_eq!(fs::read(vol.join("photos").join("a.jpg")).unwrap(), b"JPG");
+    // note.txt spans two clusters: 600 bytes, starting with 'n' and ending with 'm'.
+    let note = fs::read(vol.join("note.txt")).unwrap();
+    assert_eq!((note.len(), note[0], note[599]), (600, b'n', b'm'));
+    // The deleted file keeps its size; its name is marked with the DELETED_ prefix.
+    assert_eq!(fs::read(vol.join("DELETED_gone.bin")).unwrap().len(), 200);
+}
+
+#[test]
+fn practice_ntfs_image_extracts_its_files() {
+    let img = practice_copy("practice-ntfs", "practice-ntfs.img");
+    let dir = img.parent().unwrap().to_path_buf();
+    let r = run([
+        os("analyze"),
+        os(&img),
+        os("--extract"),
+        os(dir.join("vol")),
+    ]);
+    assert_eq!(
+        r.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+    let text = String::from_utf8_lossy(&r.stdout).to_string();
+    assert!(
+        text.contains("NTFS at byte offset 0") && text.contains("1 deleted"),
+        "{text}"
+    );
+
+    let vol = dir.join("vol").join("volume_0");
+    assert_eq!(fs::read(vol.join("HELLO.TXT")).unwrap(), b"hello ntfs");
+    assert_eq!(
+        fs::read(vol.join("DOCS").join("NOTE.TXT")).unwrap(),
+        vec![b'n'; 600]
+    );
+    assert_eq!(fs::read(vol.join("DELETED_OLD.BIN")).unwrap(), b"old");
+}
+
+#[test]
+fn analyze_json_is_one_object_and_text_goes_to_stderr() {
+    let img = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/practice-fat32.img");
+    let r = run([os("--json"), os("analyze"), os(&img)]);
+    assert_eq!(
+        r.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+    let json = String::from_utf8_lossy(&r.stdout).to_string();
+    assert_eq!(
+        json.trim().lines().count(),
+        1,
+        "stdout must be one line: {json}"
+    );
+    assert!(
+        json.starts_with(r#"{"ok":true,"command":"analyze""#),
+        "{json}"
+    );
+    assert!(json.contains(r#""kind":"FAT32""#), "{json}");
+    assert!(json.contains(r#""path":"/HELLO.TXT""#), "{json}");
+    assert!(
+        json.contains(r#""deleted":true"#),
+        "the practice image has a deleted file: {json}"
+    );
+    assert!(json.contains(r#""error":null"#), "{json}");
+    let err = String::from_utf8_lossy(&r.stderr).to_string();
+    assert!(
+        err.contains("FAT32 at byte offset 0"),
+        "text belongs on stderr: {err}"
+    );
+}
+
+#[test]
+fn hostile_long_name_cannot_write_outside_the_output_folder() {
+    // Rename LongName.txt inside a copy of the practice image to `..\..\xx.txt`. The name has the
+    // same length and the short name is untouched, so the long-name checksum still matches and the
+    // entry is still read.
+    let img = practice_copy("hostile-name", "practice-fat32.img");
+    let dir = img.parent().unwrap().to_path_buf();
+    let mut bytes = fs::read(&img).unwrap();
+
+    // A long-name entry keeps its 12 characters in three fields (5, 6 and 1 of them), with the
+    // attribute bytes in between. The first piece starts with "Long" at byte 1 of its entry.
+    let long: Vec<u16> = "LongName.txt".encode_utf16().collect();
+    let long4: Vec<u8> = "Long".encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let entry = bytes
+        .windows(long4.len())
+        .position(|w| w == long4.as_slice())
+        .expect("practice image holds a long name")
+        - 1;
+    let slots: Vec<usize> = (0..5)
+        .map(|i| entry + 1 + 2 * i)
+        .chain((0..6).map(|i| entry + 14 + 2 * i))
+        .chain(std::iter::once(entry + 28))
+        .collect();
+    let read_name = |bytes: &[u8]| -> Vec<u16> {
+        slots
+            .iter()
+            .map(|&o| u16::from_le_bytes([bytes[o], bytes[o + 1]]))
+            .collect()
+    };
+    assert_eq!(read_name(&bytes), long, "the entry is LongName.txt");
+
+    let hostile: Vec<u16> = "..\\..\\xx.txt".encode_utf16().collect();
+    assert_eq!(hostile.len(), long.len());
+    for (&o, c) in slots.iter().zip(&hostile) {
+        bytes[o..o + 2].copy_from_slice(&c.to_le_bytes());
+    }
+    fs::write(&img, &bytes).unwrap();
+
+    let r = run([
+        os("analyze"),
+        os(&img),
+        os("--extract"),
+        os(dir.join("vol")),
+    ]);
+    assert_eq!(
+        r.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+    let vol = dir.join("vol").join("volume_0");
+    assert_eq!(fs::read(vol.join("xx.txt")).unwrap(), b"long");
+    assert!(
+        !dir.join("xx.txt").exists(),
+        "the file must not escape the output folder"
+    );
+    assert!(
+        !dir.join("vol").join("xx.txt").exists(),
+        "nor sit outside the volume folder"
+    );
 }

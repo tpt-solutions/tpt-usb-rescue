@@ -299,10 +299,11 @@ fn run(cmd: Command, quiet: bool, json: bool) -> CliResult {
             Ok(exit::OK)
         }
         Command::Analyze { image, extract } => {
+            let report = ops::analyze_report(&image, extract.as_deref(), &mut out)?;
             if json {
-                return unsupported_json("analyze");
+                emit(analyze_json(&image, &report));
             }
-            ops::analyze(&image, extract.as_deref(), &mut out).map(|()| exit::OK)
+            Ok(exit::OK)
         }
         Command::Verify { output_dir, image } => {
             let report = ops::verify_report(&output_dir, &image, &mut out)?;
@@ -450,6 +451,54 @@ fn write_man_pages(cmd: &clap::Command, dir: &Path) -> Result<(), Box<dyn Error>
         std::fs::write(dir.join(format!("{name}.1")), page)?;
     }
     Ok(())
+}
+
+/// The `analyze --json` object: partitions, then each volume with its entries.
+fn analyze_json(image: &std::path::Path, report: &ops::AnalyzeReport) -> J {
+    let partitions = report
+        .partitions
+        .iter()
+        .map(|p| {
+            J::Obj(vec![
+                ("index", J::from(u32::from(p.index))),
+                ("type", J::from(u32::from(p.partition_type))),
+                ("start_lba", J::from(p.start_lba)),
+                ("sectors", J::from(p.sectors)),
+            ])
+        })
+        .collect();
+    let volumes = report
+        .volumes
+        .iter()
+        .map(|v| {
+            let entries = v
+                .entries
+                .iter()
+                .map(|e| {
+                    J::Obj(vec![
+                        ("path", J::from(e.path.as_str())),
+                        ("is_dir", J::from(e.is_dir)),
+                        ("deleted", J::from(e.deleted)),
+                        ("size", J::from(e.size)),
+                    ])
+                })
+                .collect();
+            J::Obj(vec![
+                ("kind", J::from(v.kind.as_str())),
+                ("offset", J::from(v.offset)),
+                ("error", v.error.clone().map_or(J::Null, J::from)),
+                ("extracted", v.extracted.map_or(J::Null, J::from)),
+                ("entries", J::Arr(entries)),
+            ])
+        })
+        .collect();
+    J::Obj(vec![
+        ("ok", J::Bool(true)),
+        ("command", J::from("analyze")),
+        ("image", J::from(image)),
+        ("partitions", J::Arr(partitions)),
+        ("volumes", J::Arr(volumes)),
+    ])
 }
 
 /// `--json` was given to a command that has no JSON form. Reported as a usage error.

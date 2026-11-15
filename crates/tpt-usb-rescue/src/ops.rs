@@ -330,8 +330,37 @@ pub fn carve_files(
     Ok(CarveSummary { files, index })
 }
 
+/// What `analyze` found in an image.
+#[derive(Debug, Clone, Default)]
+pub struct AnalyzeReport {
+    pub partitions: Vec<tpt_usb_rescue_fs::MbrPartition>,
+    pub volumes: Vec<VolumeReport>,
+}
+
+/// One volume found by the boot-sector scan.
+#[derive(Debug, Clone)]
+pub struct VolumeReport {
+    /// The filesystem, such as `FAT32`.
+    pub kind: String,
+    pub offset: u64,
+    /// Why the volume could not be opened, if it could not.
+    pub error: Option<String>,
+    pub entries: Vec<tpt_usb_rescue_fs::FileEntry>,
+    /// Files written by `--extract`; `None` when nothing was extracted.
+    pub extracted: Option<usize>,
+}
+
 /// Prints partition table, detected volumes and their files. Optionally extracts them.
 pub fn analyze(image: &Path, extract: Option<&Path>, out: &mut dyn Write) -> OpResult {
+    analyze_report(image, extract, out).map(|_| ())
+}
+
+/// Like [`analyze`], and also returns what it found (for `--json`).
+pub fn analyze_report(
+    image: &Path,
+    extract: Option<&Path>,
+    out: &mut dyn Write,
+) -> OpResult<AnalyzeReport> {
     let map = map_file(image)?;
     writeln!(
         out,
@@ -340,12 +369,12 @@ pub fn analyze(image: &Path, extract: Option<&Path>, out: &mut dyn Write) -> OpR
         human_bytes(map.len() as u64)
     )?;
 
-    let parts = tpt_usb_rescue_fs::mbr_partitions(&map);
-    if parts.is_empty() {
+    let partitions = tpt_usb_rescue_fs::mbr_partitions(&map);
+    if partitions.is_empty() {
         writeln!(out, "partition table: none found (MBR signature missing)")?;
     } else {
         writeln!(out, "partition table:")?;
-        for p in parts {
+        for p in &partitions {
             writeln!(
                 out,
                 "  #{} type 0x{:02X} start LBA {} ({} sectors)",
@@ -354,16 +383,29 @@ pub fn analyze(image: &Path, extract: Option<&Path>, out: &mut dyn Write) -> OpR
         }
     }
 
+    let mut report = AnalyzeReport {
+        partitions,
+        volumes: Vec::new(),
+    };
     let volumes = tpt_usb_rescue_fs::detect(&map);
     if volumes.is_empty() {
         writeln!(out, "volumes: none detected by boot-sector scan")?;
     }
     for v in &volumes {
         writeln!(out, "volume: {} at byte offset {}", v.kind, v.offset)?;
+        let mut vol = VolumeReport {
+            kind: v.kind.to_string(),
+            offset: v.offset,
+            error: None,
+            entries: Vec::new(),
+            extracted: None,
+        };
         let fs = match tpt_usb_rescue_fs::open(&map, v.offset) {
             Ok(fs) => fs,
             Err(e) => {
                 writeln!(out, "  cannot open: {e}")?;
+                vol.error = Some(e.to_string());
+                report.volumes.push(vol);
                 continue;
             }
         };
@@ -387,13 +429,21 @@ pub fn analyze(image: &Path, extract: Option<&Path>, out: &mut dyn Write) -> OpR
             )?;
         }
         if let Some(dir) = extract {
-            extract_volume(fs.as_ref(), v.offset, dir, out)?;
+            vol.extracted = Some(extract_volume(fs.as_ref(), v.offset, dir, out)?);
         }
+        vol.entries = entries;
+        report.volumes.push(vol);
     }
-    Ok(())
+    Ok(report)
 }
 
-fn extract_volume(fs: &dyn Filesystem, offset: u64, dir: &Path, out: &mut dyn Write) -> OpResult {
+/// Writes every file on the volume under `dir/volume_<offset>`; returns how many were written.
+fn extract_volume(
+    fs: &dyn Filesystem,
+    offset: u64,
+    dir: &Path,
+    out: &mut dyn Write,
+) -> OpResult<usize> {
     let base = dir.join(format!("volume_{offset}"));
     let mut written = 0usize;
     for e in fs.entries().into_iter().filter(|e| !e.is_dir) {
@@ -426,7 +476,7 @@ fn extract_volume(fs: &dyn Filesystem, offset: u64, dir: &Path, out: &mut dyn Wr
         written += 1;
     }
     writeln!(out, "  extracted {written} files to {}", base.display())?;
-    Ok(())
+    Ok(written)
 }
 
 /// A name from an untrusted image made safe to print: control characters (which could carry
