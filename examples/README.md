@@ -6,6 +6,8 @@ Everything here works with the downloaded program; nothing needs Rust or a build
 |---|---|
 | `make-test-image.sh` / `.ps1` | Builds a small practice image (noise with two PNGs and a GIF hidden in it), so you can try the tool without a drive |
 | `practice-fat32.img` | A 32 KiB FAT32 volume with a long name, a subfolder and a deleted file, for trying `analyze --extract` |
+| `practice-exfat.img` | A 32 KiB exFAT volume with nested folders, a file over two clusters and one **deleted** file |
+| `practice-ntfs.img` | A 256 KiB NTFS volume with a folder and one **deleted** file |
 | `recover.sh` / `.ps1` | The whole recovery in one command: image, analyze, carve, verify. Safe to run again to resume |
 | `chain-of-custody.md` | A form to fill in when the recovery may be needed as evidence |
 
@@ -51,6 +53,20 @@ contents of a deleted file survive only until something else uses its space. The
 fixture, so most files hold filler bytes; `HELLO.TXT` ("hello world"), `LongName.txt` ("long")
 and `DOCS/README.TXT` ("data") hold readable text. `recover.sh practice-fat32.img ./try-fat`
 runs the whole recovery on it.
+
+## Practice images for exFAT and NTFS
+
+`practice-exfat.img` and `practice-ntfs.img` are test volumes for the other two filesystems the tool
+reads. Both are copies of the fuzz seeds in `fuzz/seeds/`.
+
+```sh
+tpt-usb-rescue analyze practice-exfat.img --extract ./volumes-exfat
+tpt-usb-rescue analyze practice-ntfs.img --extract ./volumes-ntfs
+```
+
+exFAT gives `big/deep.txt` ("deep"), `photos/a.jpg` ("JPG"), `note.txt` (600 bytes that span two
+clusters) and the deleted `DELETED_gone.bin`. NTFS gives `HELLO.TXT` ("hello ntfs"), `DOCS/NOTE.TXT`
+(600 bytes) and the deleted `DELETED_OLD.BIN` ("old").
 
 ## Doing it for real
 
