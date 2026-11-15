@@ -503,6 +503,8 @@ mod tests {
         disconnect_after_reads: Option<u64>,
         /// Caps the bytes returned per read, simulating short reads.
         max_read: Option<usize>,
+        /// Fails every read with this kind of error, simulating a permission or argument fault.
+        fail_with: Option<io::ErrorKind>,
     }
 
     impl MockDev {
@@ -516,6 +518,7 @@ mod tests {
                 reads: AtomicU64::new(0),
                 disconnect_after_reads: None,
                 max_read: None,
+                fail_with: None,
             }
         }
     }
@@ -530,6 +533,9 @@ mod tests {
 
         fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, HalError> {
             let n = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
+            if let Some(kind) = self.fail_with {
+                return Err(io::Error::from(kind).into());
+            }
             if self.disconnect_after_reads.is_some_and(|limit| n > limit) {
                 return Err(io::Error::from_raw_os_error(REMOVED_CODES[0]).into()); // device gone
             }
@@ -574,6 +580,27 @@ mod tests {
             pass2_retries: 1,
             trim_retries: 2,
             read_timeout: Duration::from_secs(5),
+        }
+    }
+
+    #[test]
+    fn fatal_error_stops_the_run_and_leaves_the_map_untouched() {
+        for kind in [io::ErrorKind::PermissionDenied, io::ErrorKind::InvalidInput] {
+            let mut dev = MockDev::new(pattern(32, 512), HashSet::new());
+            dev.fail_with = Some(kind);
+            let map = Mapfile::open_or_create(&tmp("fatal.map"), 512, 32).unwrap();
+            let out = OutputImage::create(&tmp("fatal.img"), 32 * 512).unwrap();
+            let mut eng = Engine::new(Arc::new(dev), map, out, cfg_small()).unwrap();
+            let err = eng.run_pass(1).unwrap_err();
+            assert!(
+                matches!(err, EngineError::Fatal { sector: 0, .. }),
+                "{kind:?}: {err}"
+            );
+            // A programming or permission fault says nothing about the medium: no sector may be
+            // recorded as bad, or a later --resume would skip data that was never tried.
+            let t = eng.totals();
+            assert_eq!((t.bad, t.non_trimmed, t.recovered), (0, 0, 0), "{kind:?}");
+            assert_eq!(t.untested, 32 * 512);
         }
     }
 
