@@ -58,6 +58,24 @@ fn system_root() -> PathBuf {
     }
 }
 
+/// Returns `path` if it exists, otherwise its nearest existing ancestor.
+///
+/// An output image usually doesn't exist yet, but the filesystem it will be created on does.
+#[cfg(unix)]
+pub(crate) fn nearest_existing(path: &Path) -> PathBuf {
+    let mut current = path.to_path_buf();
+    loop {
+        if current.exists() {
+            return current;
+        }
+        match current.parent() {
+            Some(p) if p.as_os_str().is_empty() => return PathBuf::from("."),
+            Some(p) => current = p.to_path_buf(),
+            None => return PathBuf::from("."),
+        }
+    }
+}
+
 fn same_path(a: &Path, b: &Path) -> bool {
     match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
         (Ok(x), Ok(y)) => x == y,
@@ -97,5 +115,17 @@ mod tests {
         let dev = Path::new("/dev/sdb");
         assert!(check_output(dev, Path::new(r"\\.\PhysicalDrive3")).is_err());
         assert!(check_output(dev, Path::new("/dev/sdc")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nearest_existing_walks_up_for_new_files() {
+        let tmp = std::env::temp_dir();
+        let missing = tmp.join("tpt-no-such-dir-xyz").join("sub").join("out.img");
+        assert_eq!(nearest_existing(&missing), tmp);
+        assert_eq!(
+            nearest_existing(Path::new("recovered-does-not-exist.img")),
+            PathBuf::from(".")
+        );
     }
 }

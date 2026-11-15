@@ -7,6 +7,7 @@
 
 pub mod buf;
 pub mod devices;
+mod mounts;
 pub mod safety;
 
 #[cfg(target_os = "linux")]

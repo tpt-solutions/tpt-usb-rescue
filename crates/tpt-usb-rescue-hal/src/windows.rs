@@ -101,36 +101,55 @@ pub(crate) fn open_direct(path: &Path) -> Result<(File, DeviceGeometry), HalErro
 
 /// Returns true if the volume or path lives on the physical drive named by `device`.
 pub(crate) fn path_on_device(path: &Path, device: &Path) -> Result<bool, HalError> {
-    // Not a physical drive (for example an image file), so nothing can live on it.
-    let Some(target) = disk_number_from_device(device) else {
-        return Ok(false);
+    // The source may be a physical drive or a volume such as `\\.\E:`; a volume is resolved to
+    // the physical disk beneath it so the guards still apply to partitions. Anything else (for
+    // example an image file) has nothing living on it.
+    let target = match (disk_number_from_device(device), volume_letter(device)) {
+        (Some(n), _) => n,
+        (None, Some(letter)) => disk_number_of_volume(letter)?,
+        (None, None) => return Ok(false),
     };
     let absolute = std::path::absolute(path)?;
-    let drive = absolute
+    // Only `C:` and verbatim `\\?\C:` style paths map to a local volume; UNC shares do not.
+    let letter = absolute
         .components()
         .find_map(|c| match c {
-            std::path::Component::Prefix(p) => Some(p.as_os_str().to_string_lossy().into_owned()),
+            std::path::Component::Prefix(p) => Some(p.kind()),
+            _ => None,
+        })
+        .and_then(|kind| match kind {
+            std::path::Prefix::Disk(l) | std::path::Prefix::VerbatimDisk(l) => {
+                Some(char::from(l).to_ascii_uppercase())
+            }
             _ => None,
         })
         .ok_or_else(|| {
-            HalError::InvalidArgument(format!("no drive prefix on {}", path.display()))
+            HalError::InvalidArgument(format!(
+                "{} is not on a local drive letter (network paths are not supported)",
+                path.display()
+            ))
         })?;
-    // `C:` or `\\?\C:` style prefixes both end in the drive letter.
-    let letter = drive
-        .trim_end_matches(['\\', '/'])
-        .chars()
-        .last()
-        .filter(|c| c.is_ascii_alphabetic());
-    let Some(letter) = letter else {
-        return Err(HalError::Unsupported);
-    };
+    Ok(disk_number_of_volume(letter)? == target)
+}
+
+/// The physical disk number under volume `letter`.
+fn disk_number_of_volume(letter: char) -> Result<u32, HalError> {
     let volume = PathBuf::from(format!(r"\\.\{letter}:"));
     let file = OpenOptions::new()
         .read(true)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
         .open(&volume)?;
     let num: StorageDeviceNumber = ioctl_out(&file, IOCTL_STORAGE_GET_DEVICE_NUMBER)?;
-    Ok(num.device_number == target)
+    Ok(num.device_number)
+}
+
+/// The drive letter of a `\\.\X:` volume path.
+fn volume_letter(device: &Path) -> Option<char> {
+    let s = device.to_string_lossy();
+    let rest = s.strip_prefix(r"\\.\")?;
+    let mut chars = rest.chars();
+    let letter = chars.next().filter(char::is_ascii_alphabetic)?;
+    (chars.as_str() == ":").then(|| letter.to_ascii_uppercase())
 }
 
 /// Enumerates `\\.\PhysicalDrive0..31` that can be opened.
@@ -161,6 +180,13 @@ fn disk_number_from_device(device: &Path) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_volume_letter() {
+        assert_eq!(volume_letter(Path::new(r"\\.\e:")), Some('E'));
+        assert_eq!(volume_letter(Path::new(r"\\.\PhysicalDrive1")), None);
+        assert_eq!(volume_letter(Path::new(r"\\.\E:\x")), None);
+    }
 
     #[test]
     fn parses_physical_drive_number() {

@@ -59,6 +59,21 @@ pub(crate) fn open_direct(path: &Path) -> Result<(File, DeviceGeometry), HalErro
 }
 
 /// Whole disks in `/dev` (`diskN`, not slices such as `diskNsM`).
+/// Maps a slice name such as `disk2s1` to its whole disk `disk2`; other names pass through.
+fn whole_disk_of(name: &str) -> &str {
+    if let Some(rest) = name.strip_prefix("disk") {
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let tail = &rest[digits..];
+        let is_slice = tail
+            .strip_prefix('s')
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+        if digits > 0 && is_slice {
+            return &name[..4 + digits];
+        }
+    }
+    name
+}
+
 fn is_whole_disk(name: &str) -> bool {
     name.strip_prefix("disk")
         .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
@@ -89,14 +104,15 @@ pub(crate) fn list() -> Result<Vec<DeviceInfo>, HalError> {
 /// Returns whether `path` is stored on `device` or one of its slices.
 pub(crate) fn path_on_device(path: &Path, device: &Path) -> Result<bool, HalError> {
     let name = match device.file_name().and_then(|n| n.to_str()) {
-        Some(n) => n.trim_start_matches('r').to_string(),
+        Some(n) => whole_disk_of(n.trim_start_matches('r')).to_string(),
         None => return Ok(false),
     };
     if !is_whole_disk(&name) {
         // Not a disk node (for example an image file): nothing can live on it.
         return Ok(false);
     }
-    let target = fs::metadata(path)?.dev();
+    // The output file may not exist yet; its filesystem is that of the nearest existing ancestor.
+    let target = fs::metadata(crate::safety::nearest_existing(path))?.dev();
 
     let mut nodes = vec![Path::new("/dev").join(&name)];
     for entry in fs::read_dir("/dev")? {
@@ -121,6 +137,14 @@ pub(crate) fn path_on_device(path: &Path, device: &Path) -> Result<bool, HalErro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slices_map_to_their_whole_disk() {
+        assert_eq!(whole_disk_of("disk2s1"), "disk2");
+        assert_eq!(whole_disk_of("disk12s10"), "disk12");
+        assert_eq!(whole_disk_of("disk2"), "disk2");
+        assert_eq!(whole_disk_of("notadisk"), "notadisk");
+    }
 
     #[test]
     fn raw_node_mapping() {

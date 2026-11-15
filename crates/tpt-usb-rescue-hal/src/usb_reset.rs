@@ -37,9 +37,25 @@ pub fn reset_block_device(sys_root: &Path, name: &str) -> Result<(), HalError> {
 }
 
 fn toggle_authorized(usb: &Path) -> Result<(), HalError> {
-    fs::write(usb.join("authorized"), "0")?;
-    fs::write(usb.join("authorized"), "1")?;
-    Ok(())
+    let attr = usb.join("authorized");
+    fs::write(&attr, "0")?;
+    // Never leave the device deauthorized: it would vanish until the user replugs it.
+    let mut last = None;
+    for attempt in 0..5 {
+        match fs::write(&attr, "1") {
+            Ok(()) => return Ok(()),
+            Err(e) => last = Some(e),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100 * (attempt + 1)));
+    }
+    let err = last.unwrap_or_else(|| io::Error::other("unknown error"));
+    Err(HalError::Io(io::Error::new(
+        err.kind(),
+        format!(
+            "USB device was deauthorized but could not be re-authorized ({err}); replug it or write 1 to {}",
+            attr.display()
+        ),
+    )))
 }
 
 #[cfg(test)]
