@@ -9,6 +9,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use tpt_usb_rescue_carver::extract::{file_name, write_carved};
 use tpt_usb_rescue_carver::integrity::{Outcome, digest, verify_output};
@@ -35,7 +36,12 @@ pub struct ImageRequest {
     pub pass: Option<u8>,
     pub resume: bool,
     pub allow_system_disk: bool,
+    /// Raise to stop the copy. Progress is saved before the run stops.
+    pub cancel: Option<Arc<AtomicBool>>,
 }
+
+/// Message returned when the user stops a copy.
+pub const STOPPED_MESSAGE: &str = "Copy stopped. Your progress is saved.";
 
 /// Mapfile export formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +106,9 @@ fn run_image<D: RawDevice + Send + Sync + 'static>(
     };
 
     let mut engine = Engine::new(dev, map, image, EngineConfig::default())?;
+    if let Some(flag) = req.cancel.clone() {
+        engine.set_cancel_flag(flag);
+    }
     if let Some(device) = reset_device {
         engine.set_reset_hook(Box::new(move |_sector| {
             tpt_usb_rescue_hal::reset_device(&device).map_err(|e| e.to_string())
@@ -123,6 +132,10 @@ fn run_image<D: RawDevice + Send + Sync + 'static>(
             Err(EngineError::DeviceRemoved { .. }) => {
                 writeln!(out, "device removed; progress saved")?;
                 return Err("device removed".into());
+            }
+            Err(EngineError::Stopped) => {
+                writeln!(out, "{STOPPED_MESSAGE}")?;
+                return Err(STOPPED_MESSAGE.into());
             }
             Err(e) => return Err(e.into()),
         }

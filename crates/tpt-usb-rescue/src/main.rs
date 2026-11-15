@@ -100,6 +100,7 @@ fn run(cmd: Command) -> CliResult {
                 pass,
                 resume,
                 allow_system_disk,
+                cancel: None,
             };
             ops::image(&req, &mut out, None)
         }

@@ -170,7 +170,6 @@ unsafe extern "system" {
     fn SetWindowTextW(hwnd: HWND, text: *const u16) -> i32;
     fn EnableWindow(hwnd: HWND, enable: i32) -> i32;
     fn LoadCursorW(instance: HINSTANCE, name: *const u16) -> HCURSOR;
-    fn MessageBoxW(hwnd: HWND, text: *const u16, caption: *const u16, ty: u32) -> i32;
 }
 
 #[link(name = "gdi32")]
@@ -199,22 +198,6 @@ unsafe extern "system" {
 /// UTF-16, NUL-terminated.
 pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-/// Message-box helper for fatal startup problems.
-pub fn message_box(title: &str, text: &str) {
-    let t = wide(title);
-    let m = wide(text);
-    // SAFETY: both buffers are NUL-terminated UTF-16 and live until the call returns; a null owner
-    // window makes the box application-modal to nothing in particular.
-    unsafe {
-        MessageBoxW(
-            std::ptr::null_mut(),
-            m.as_ptr(),
-            t.as_ptr(),
-            MB_OK | MB_ICONERROR,
-        );
-    }
 }
 
 pub fn module_handle() -> HINSTANCE {
@@ -504,4 +487,122 @@ pub fn file_dialog(owner: HWND, save: bool, filter: &str, default_ext: &str) -> 
     }
     let end = file.iter().position(|&c| c == 0).unwrap_or(file.len());
     Some(String::from_utf16_lossy(&file[..end]))
+}
+
+// --- guided UI additions -------------------------------------------------------------------
+
+pub const BS_GROUPBOX: u32 = 0x0000_0007;
+pub const MB_YESNO: u32 = 0x0000_0004;
+pub const MB_ICONINFORMATION: u32 = 0x0000_0040;
+pub const MB_ICONWARNING: u32 = 0x0000_0030;
+pub const MB_ICONQUESTION: u32 = 0x0000_0020;
+pub const IDYES: i32 = 6;
+pub const TTS_ALWAYSTIP: u32 = 0x0000_0001;
+pub const TTS_NOPREFIX: u32 = 0x0000_0002;
+pub const TTM_ADDTOOLW: u32 = WM_USER + 50;
+pub const TTM_SETMAXTIPWIDTH: u32 = WM_USER + 24;
+pub const TTF_IDISHWND: u32 = 0x0000_0001;
+pub const TTF_SUBCLASS: u32 = 0x0000_0010;
+pub const WS_POPUP: u32 = 0x8000_0000;
+pub const BM_SETCHECK_ON: usize = 1;
+
+#[repr(C)]
+pub struct RECT {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+#[repr(C)]
+struct TOOLINFOW {
+    cb_size: u32,
+    flags: u32,
+    hwnd: HWND,
+    id: usize,
+    rect: RECT,
+    hinst: HINSTANCE,
+    text: *const u16,
+    lparam: isize,
+}
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn MessageBoxExW(hwnd: HWND, text: *const u16, caption: *const u16, ty: u32, lang: u16) -> i32;
+}
+
+#[link(name = "shell32")]
+unsafe extern "system" {
+    fn IsUserAnAdmin() -> i32;
+}
+
+/// True when this process runs with Administrator rights.
+pub fn is_administrator() -> bool {
+    // SAFETY: takes no arguments and only reads the current process token.
+    unsafe { IsUserAnAdmin() != 0 }
+}
+
+/// Shows a dialog owned by `owner` and returns the button the user pressed.
+pub fn dialog(owner: HWND, title: &str, text: &str, flags: u32) -> i32 {
+    let t = wide(title);
+    let m = wide(&text.replace("\r\n", "\n").replace('\n', "\r\n"));
+    // SAFETY: both buffers are NUL-terminated UTF-16 and live for the call. The owner handle is a
+    // window of this process, or null.
+    unsafe { MessageBoxExW(owner, m.as_ptr(), t.as_ptr(), flags, 0) }
+}
+
+/// Creates a tooltip control for the given top-level window.
+pub fn create_tooltip(parent: HWND) -> HWND {
+    let class = wide("tooltips_class32");
+    // SAFETY: class name is a NUL-terminated string; the parent is a live window of this process.
+    let tip = unsafe {
+        CreateWindowExW(
+            0,
+            class.as_ptr(),
+            std::ptr::null(),
+            WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            parent,
+            std::ptr::null_mut(),
+            module_handle(),
+            std::ptr::null(),
+        )
+    };
+    // Wrap long explanations instead of drawing one very wide line.
+    send(tip, TTM_SETMAXTIPWIDTH, 0, 360);
+    tip
+}
+
+/// Attaches `text` as the tooltip shown when the mouse rests on `control`.
+pub fn add_tooltip(tip: HWND, control: HWND, text: &str) {
+    if tip.is_null() || control.is_null() {
+        return;
+    }
+    let w = wide(text);
+    let info = TOOLINFOW {
+        cb_size: std::mem::size_of::<TOOLINFOW>() as u32,
+        flags: TTF_IDISHWND | TTF_SUBCLASS,
+        hwnd: control,
+        id: control as usize,
+        rect: RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        },
+        hinst: std::ptr::null_mut(),
+        text: w.as_ptr(),
+        lparam: 0,
+    };
+    // SAFETY: `info` and the text buffer live until SendMessage returns; the tooltip copies the text.
+    unsafe {
+        SendMessageW(tip, TTM_ADDTOOLW, 0, &info as *const TOOLINFOW as isize);
+    }
+}
+
+pub fn set_check(hwnd: HWND, on: bool) {
+    send(hwnd, BM_SETCHECK, if on { BM_SETCHECK_ON } else { 0 }, 0);
 }

@@ -95,17 +95,23 @@ its byte range in the image. It exits with an error if any file differs or is mi
 
 ## The Windows GUI
 
-Run `tpt-usb-rescue-gui.exe`, or start it as Administrator to see physical drives.
+Run `tpt-usb-rescue-gui.exe`. The window is a four-step guide, from top to bottom:
 
-1. Choose a source in **Source**, or pick a device in the **Device** list and press **Refresh** if
-   it is missing.
-2. Set **Image** to the output file. The mapfile defaults to the same name with `.map`.
-3. Press **Start imaging**. Progress and results appear in the log.
-4. **Carve**, **Verify** and **Analyze** work on the **Image** file. Carved files go to a `carved`
-   folder beside it.
+- **Top line:** says whether the program runs as Administrator. Disks can only be read when it does.
+  If it says NO, close the program, right-click it and choose *Run as administrator*.
+- **Step 1: Choose what to copy.** Pick your USB stick in *Found disks* (press *Refresh* after you
+  plug it in), or browse for a file to practise with.
+- **Step 2: Choose where to save the copy.** Type a file name or press *Browse*. Use a different disk
+  from the stick. *Progress notes* are created for you; keep them next to the copy.
+- **Step 3: Copy the disk.** Press *Start copy*. You are asked to confirm first. The stick is only
+  read. Press *Stop* at any time; your progress is saved. To carry on later, tick *Continue a previous
+  run* and press *Start copy* again.
+- **Step 4: Find files (optional).** *List files in the copy* shows what Windows can read.
+  *Find files in the copy* saves pictures, documents and other files into a `carved` folder next to
+  the copy. *Check found files* confirms the saved files match the copy.
 
-The window uses the same code as the command line, so the same safety checks apply.
-
+Every control has a tooltip: rest the mouse on it. *Help: how do I use this?* shows the same steps
+in a dialog. Every failure explains what went wrong and what to try next.
 ## Testing without hardware
 
 The repository contains everything needed to try the tool on synthetic data:

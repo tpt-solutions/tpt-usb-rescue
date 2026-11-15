@@ -19,6 +19,7 @@ use crate::mapfile::{Mapfile, MapfileError, Totals};
 use crate::output::OutputImage;
 use std::io;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 use tpt_usb_rescue_hal::{AlignedBuf, DeviceGeometry, HalError, RawDevice};
@@ -97,6 +98,8 @@ pub enum EngineError {
     DeviceRemoved { sector: u64 },
     #[error("fatal error at sector {sector}: {source}")]
     Fatal { sector: u64, source: HalError },
+    #[error("stopped by the user; progress saved")]
+    Stopped,
 }
 
 enum Read {
@@ -176,6 +179,7 @@ pub struct Engine<D: RawDevice + Send + Sync + 'static> {
     progress: Option<ProgressHook>,
     reset_hook: Option<ResetHook>,
     last_reset_error: Option<String>,
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
@@ -212,6 +216,7 @@ impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
             progress: None,
             reset_hook: None,
             last_reset_error: None,
+            cancel: None,
         })
     }
 
@@ -248,7 +253,22 @@ impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
         if let Some(hook) = self.progress.as_mut() {
             hook(&self.map.totals());
         }
+        if self.cancel_requested() {
+            return Err(EngineError::Stopped);
+        }
         Ok(())
+    }
+
+    /// Sets a flag that the user can raise to stop the run. The engine checks it at every
+    /// checkpoint, so it stops after the current chunk with progress saved.
+    pub fn set_cancel_flag(&mut self, flag: Arc<AtomicBool>) {
+        self.cancel = Some(flag);
+    }
+
+    fn cancel_requested(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .is_some_and(|f| f.load(Ordering::SeqCst))
     }
 
     /// Registers a hook called when a read times out, before the reader is replaced. Used to reset
@@ -424,7 +444,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::AtomicU64;
     use std::time::Instant;
 
     /// Thread-safe in-memory device with injectable bad sectors, hangs and a disconnect.
@@ -655,6 +675,19 @@ mod tests {
         eng.run_pass(1).unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(eng.last_reset_error(), Some("no root"));
+    }
+
+    #[test]
+    fn cancel_flag_stops_the_run_with_progress_saved() {
+        let data = pattern(40, 512);
+        let dev = Arc::new(MockDev::new(data, HashSet::new()));
+        let map = Mapfile::open_or_create(&tmp("cancel.map"), 512, 40).unwrap();
+        let out = OutputImage::create(&tmp("cancel.img"), 40 * 512).unwrap();
+        let mut eng = Engine::new(dev, map, out, cfg_small()).unwrap();
+        let flag = Arc::new(AtomicBool::new(true));
+        eng.set_cancel_flag(flag);
+        let err = eng.run_pass(1).unwrap_err();
+        assert!(matches!(err, EngineError::Stopped), "{err}");
     }
 
     #[test]
