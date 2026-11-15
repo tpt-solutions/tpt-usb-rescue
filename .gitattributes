@@ -5,3 +5,6 @@
 *.rc text eol=crlf
 *.png binary
 *.ico binary
+
+# Disk images are binary: never convert their line endings.
+*.img binary
