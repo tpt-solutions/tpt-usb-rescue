@@ -3,7 +3,7 @@
 //! The parsers read the image directly, so they work even when the OS refuses to mount the
 //! volume ("drive needs formatting") or the partition table is damaged. [`detect`] finds volumes
 //! by scanning for boot-sector signatures, which does not depend on the partition table at all.
-//! NTFS is not implemented yet.
+//! NTFS is parsed by the [`ntfs`] module.
 
 pub mod exfat;
 pub mod fat32;
