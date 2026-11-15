@@ -114,7 +114,7 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 - [x] `image --hash` hashes the finished image into `<output>.sha256`; `verify` checks it (tested)
 - [x] Per-file SHA-256 in the carve `index.csv`; `verify` checks it (older indexes still read)
 - [x] `carve` and `analyze` say "N more" when they truncate their listings; names from images are printed with control characters removed
-- [ ] Shell completions (`completions <shell>`) and man pages
+- [x] Shell completions (`completions <shell>`) and man pages (`man --out-dir`); both ship in the release archives (tested locally; the archive step has not run on GitHub)
 
 ## 11. CI and release automation
 - [x] CI: macOS job, `--locked`, rust-cache, `cargo deny`, scheduled advisory check (`security.yml`), fuzz build-only job, `cargo doc -D warnings`, doc tests (workflows written; not yet run on GitHub)

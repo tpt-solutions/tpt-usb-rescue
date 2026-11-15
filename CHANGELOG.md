@@ -18,6 +18,7 @@ uses semantic versioning once 1.0.0 is released.
 - `verify` rejects `index.csv` entries that name files outside the output folder; `mapfile --out` never overwrites.
 
 ### Added
+- `completions <shell>` and `man [--out-dir DIR]` generate shell completions and manual pages; the release archives include them and the examples.
 - `--json` for `image`, `carve`, `verify`, `list-devices` and `mapfile`: one JSON object on stdout, messages on stderr. `carve` now records a SHA-256 for every file in `index.csv`, and `verify` checks it.
 - `examples/`: practice-image and one-command recovery scripts (bash and PowerShell) and a chain-of-custody form; `docs/TROUBLESHOOTING.md`; issue and pull request templates.
 - CLI: live progress on stderr (`-q` to silence), clean stop on Ctrl-C, documented exit codes (3 stopped, 4 verify failed, 5 unrecovered data), optional `--mapfile` (defaults to `<output>.map`), `--timeout`, `--chunk-kib`, `--no-reset` and `--hash` (writes `<output>.sha256`, checked by `verify`).

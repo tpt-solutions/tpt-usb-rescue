@@ -121,6 +121,23 @@ its byte range in the image. It exits with code 4 if any file differs or is miss
 was made with `--hash`, `verify` also checks it against `recovery.img.sha256` and reports
 `IMAGE CHANGED` if it no longer matches.
 
+## Shell completions and man pages
+
+The release archives include both, in `completions/` and `man/`. You can also generate them from
+the program:
+
+```sh
+# Completions: bash, zsh, fish, elvish or powershell
+tpt-usb-rescue completions bash > ~/.local/share/bash-completion/completions/tpt-usb-rescue
+tpt-usb-rescue completions zsh  > ~/.zfunc/_tpt-usb-rescue
+tpt-usb-rescue completions fish > ~/.config/fish/completions/tpt-usb-rescue.fish
+tpt-usb-rescue completions powershell >> $PROFILE
+
+# Manual pages: one for the tool and one per command (tpt-usb-rescue-image.1, ...)
+tpt-usb-rescue man --out-dir ~/.local/share/man/man1
+man tpt-usb-rescue-image
+```
+
 ## Exit codes
 
 | Code | Meaning |

@@ -21,7 +21,9 @@ cargo install --locked --git https://github.com/tpt-solutions/tpt-usb-rescue tpt
 cargo binstall tpt-usb-rescue
 ```
 
-Reading a raw disk needs administrator rights on Windows and root on Linux and macOS.
+Reading a raw disk needs administrator rights on Windows and root on Linux and macOS. Shell
+completions and man pages: `tpt-usb-rescue completions <shell>`, `tpt-usb-rescue man --out-dir <dir>`
+(see [Usage](docs/USAGE.md#shell-completions-and-man-pages)).
 
 ## Usage
 
