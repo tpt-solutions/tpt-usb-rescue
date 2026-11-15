@@ -2,6 +2,8 @@
 
 ## Before anything else
 
+New to this? Read the [recovery playbook](PLAYBOOK.md) first: it puts the steps in order.
+
 - Work on the **image**, never on the failing drive. Do not mount it, run `chkdsk` or `fsck`, or
   let the system "repair" it. Every extra read can make a dying drive worse.
 - If the drive clicks, grinds or has been dropped, stop. A software tool cannot help with a

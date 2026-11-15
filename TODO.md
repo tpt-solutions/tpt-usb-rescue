@@ -25,7 +25,7 @@
 - [x] I/O fault classification (Uncategorized / InputOutput / device removed)
 - [x] Pass 1: 1MB sweep, mark bad chunks
 - [x] Pass 2: retries at 4KB then 512B
-- [x] Pass 3: trimming bad-block edges (NonTrimmed -> exact boundary)
+- [x] Pass 2 reads every failing 4 KiB block sector by sector, so bad areas already end on exact sector boundaries. Pass 3 then retries the first and last sector of each bad run with more attempts and trims inward while reads succeed (this is not ddrescue's trimming; there is no separate NonTrimmed-to-boundary step)
 - [x] Deterministic state machine; resume after kill (`--resume`)
 - [x] Zero-fill unrecoverable sectors, keep byte alignment
 - [x] 5s read timeout + USB reset (5 s timeout: reads run on a reader thread and a timed-out read counts as a media failure. Reset, Linux only: the USB device behind the disk is re-enumerated through sysfs `authorized`, which needs root. This is device re-enumeration, not a controller reset, and it has not been run on hardware)
@@ -96,7 +96,7 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 - [x] Windows UNC output paths are refused instead of matched to a fake drive letter
 - [x] `index.csv` names that escape the output folder are rejected (tested)
 - [x] `mapfile --export --out` never overwrites an existing file, including the mapfile itself (tested)
-- [ ] Pass 3 only retries the first and last sector of each bad run: either implement real trimming or fix the wording above
+- [x] Pass 3 wording corrected (see Milestone 2); a ddrescue-style trim that reads inward from the edges of a failed chunk is not implemented and would only change the order of reads
 - [ ] Passes 2 and 3 fsync twice per sector; batch them
 - [x] FAT32 long names: validate the LFN checksum, and keep the piece order of deleted names (tested)
 - [x] Tests added: resume with a truncated or missing image (end to end)
@@ -129,12 +129,14 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 
 ## 12. Adoption: docs, examples, templates, packaging
 - [x] README install section
-- [ ] README: badges, GUI screenshot or GIF, 60-second quickstart with real output; fix "macOS later" (done) and add the GUI to the crate table (done)
+- [x] README: CI and license badges (the CI badge shows nothing until the repository has run the workflow)
+- [ ] README: GUI screenshot or GIF, 60-second quickstart with real output; fix "macOS later" (done) and add the GUI to the crate table (done)
 - [x] Fix the stray `` `r`n `` in CHANGELOG.md line 11
 - [x] `examples/`: `make-test-image` (bash and PowerShell; a noise image with hidden PNGs and a GIF), `recover.sh` / `recover.ps1` (image, analyze, carve, verify; resumes on re-run), chain-of-custody template (all run here)
 - [ ] `examples/`: a practice image with a real FAT32/NTFS filesystem and deleted files (needs a way to build one without mkfs); sample config once a config file exists
 - [x] docs: `docs/TROUBLESHOOTING.md`, exit-code table in USAGE.md
-- [ ] docs: failing-drive playbook (physical handling, when to stop), worked walkthrough with real output
+- [x] docs: failing-drive playbook (`docs/PLAYBOOK.md`)
+- [ ] docs: worked walkthrough with real output
 - [ ] Packaging: Scoop, winget, Homebrew tap, AUR, `.deb`, Docker recipe (`--device /dev/sdX`)
 - [x] Issue and PR templates
 

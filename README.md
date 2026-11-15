@@ -1,5 +1,8 @@
 # tpt-usb-rescue
 
+[![CI](https://github.com/tpt-solutions/tpt-usb-rescue/actions/workflows/ci.yml/badge.svg)](https://github.com/tpt-solutions/tpt-usb-rescue/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+
 Forensic data recovery engine (Rust) for degraded or corrupted USB mass storage.
 Status: **pre-alpha**. The imaging, carving and filesystem code is implemented and tested on
 synthetic data. Hardware paths are compiled but not yet validated on real failing media.
@@ -73,6 +76,7 @@ need a window started as Administrator.
 ## Documentation
 
 - [Usage](docs/USAGE.md): imaging, resume, carving, analysis, verification, exit codes and the GUI
+- [Recovery playbook](docs/PLAYBOOK.md): the order of work for a failing drive, and when to stop and call a lab
 - [Troubleshooting](docs/TROUBLESHOOTING.md): common errors, slow drives, what the exit codes mean
 - [Examples](examples/README.md): practice image, one-command recovery scripts (bash and PowerShell), chain-of-custody form
 - [Architecture](docs/ARCHITECTURE.md): crates, mapfile format, carving and filesystem design, safety model
