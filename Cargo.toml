@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-rc.1"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -21,11 +21,11 @@ keywords = ["forensics", "data-recovery", "usb", "ddrescue", "carving"]
 categories = ["command-line-utilities", "filesystem"]
 
 [workspace.dependencies]
-tpt-usb-rescue-hal = { path = "crates/tpt-usb-rescue-hal", version = "0.1.0" }
-tpt-usb-rescue = { path = "crates/tpt-usb-rescue", version = "0.1.0" }
-tpt-usb-rescue-imager = { path = "crates/tpt-usb-rescue-imager", version = "0.1.0" }
-tpt-usb-rescue-carver = { path = "crates/tpt-usb-rescue-carver", version = "0.1.0" }
-tpt-usb-rescue-fs = { path = "crates/tpt-usb-rescue-fs", version = "0.1.0" }
+tpt-usb-rescue-hal = { path = "crates/tpt-usb-rescue-hal", version = "0.1.0-rc.1" }
+tpt-usb-rescue = { path = "crates/tpt-usb-rescue", version = "0.1.0-rc.1" }
+tpt-usb-rescue-imager = { path = "crates/tpt-usb-rescue-imager", version = "0.1.0-rc.1" }
+tpt-usb-rescue-carver = { path = "crates/tpt-usb-rescue-carver", version = "0.1.0-rc.1" }
+tpt-usb-rescue-fs = { path = "crates/tpt-usb-rescue-fs", version = "0.1.0-rc.1" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 clap_mangen = "0.3"

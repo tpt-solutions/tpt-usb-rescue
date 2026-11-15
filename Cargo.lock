@@ -636,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-usb-rescue"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "clap",
  "clap_complete",
@@ -652,7 +652,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-usb-rescue-carver"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "blake3",
  "crc32fast",
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-usb-rescue-fs"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "proptest",
  "thiserror",
@@ -672,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-usb-rescue-gui"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "tpt-usb-rescue",
  "tpt-usb-rescue-hal",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-usb-rescue-hal"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "libc",
  "thiserror",
@@ -689,7 +689,7 @@ dependencies = [
 
 [[package]]
 name = "tpt-usb-rescue-imager"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "crc32fast",
  "proptest",
