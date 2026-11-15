@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest something the tool should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the recovery situation first, not the feature.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What do you do today instead?
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Is this about
+      options:
+        - A file type the carver should find
+        - A filesystem the analyzer should read
+        - Imaging a difficult drive
+        - Scripting or automation
+        - Something else

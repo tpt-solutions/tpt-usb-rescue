@@ -73,6 +73,78 @@
 - [x] macOS HAL (type-checked for macOS; not run on a Mac)
 - [ ] Fragmented-file stitching using fs metadata (FAT and exFAT readers already follow surviving FAT chains; stitching carved fragments of deleted files without metadata is not started)
 
+## 9. Review follow-up: bugs and data safety (2026-11 platform review)
+Findings come from a read-through of all crates. Fixed items are covered by tests where noted; Linux and macOS changes compile and pass clippy for those targets but have not run on real devices.
+- [x] Linux/macOS: output-on-source check failed for an output file that does not exist yet (stat the nearest existing ancestor)
+- [x] `--resume` refuses a missing or truncated image instead of recreating it as zeros the mapfile calls recovered
+- [x] `analyze --extract` sanitizes names from untrusted images (no `..`, drive prefixes, separators; tested)
+- [x] Resume guard counts any recorded progress, not only recovered/bad sectors
+- [x] System-disk and output-on-source guards cover partitions and volumes (Linux sysfs + mountinfo for btrfs/LVM/LUKS/md, macOS slices, Windows `\\.\X:` volumes)
+- [ ] macOS: system-disk guard on APFS (root is a synthesized container disk, not the physical disk)
+- [x] Short reads queue the unread tail for the next pass (tested)
+- [x] Image is fsynced before the mapfile records data as recovered
+- [x] Per-OS device-removal error codes (EIO stays a media error; tested)
+- [x] Stop after 10 consecutive timed-out reads (no more leaked reader threads); USB reset fires once per hang (tested)
+- [x] exFAT NoFatChain directories read beyond the first cluster (tested)
+- [x] NTFS/FAT32/exFAT: checked arithmetic and allocation caps on hostile input
+- [ ] Run the fuzz targets again with overflow checks (debug build) after the fs hardening
+- [x] `detect()` ignores backup boot sectors (no test yet)
+- [x] Mapfile: a damaged record in the middle is skipped (later records kept, user warned); failed writes roll back; `u32::MAX` clamp removed (tested)
+- [x] Carver: ZIP walk picks the end record with a consistent directory (stored inner ZIPs; tested); files with no end marker are capped at 256 MiB; `find_all` is lazy
+- [x] USB reset retries re-authorizing and reports how to recover if it fails
+- [x] `BLKGETSIZE64` encoding correct on MIPS, PowerPC and SPARC
+- [x] Windows UNC output paths are refused instead of matched to a fake drive letter
+- [x] `index.csv` names that escape the output folder are rejected (tested)
+- [x] `mapfile --export --out` never overwrites an existing file, including the mapfile itself (tested)
+- [ ] Pass 3 only retries the first and last sector of each bad run: either implement real trimming or fix the wording above
+- [ ] Passes 2 and 3 fsync twice per sector; batch them
+- [ ] FAT32 long names: validate the LFN checksum
+- [x] Tests added: resume with a truncated or missing image (end to end)
+- [ ] Tests still missing: hostile extract names end to end, backup-boot-sector dedupe, `Fault::Fatal` paths in the engine, pass 3 behaviour
+
+## 10. CLI usability and automation
+- [x] Progress on stderr (percent, bytes, rate, ETA, bad bytes); non-TTY aware; `--quiet` (a `-v` flag is not added)
+- [x] Ctrl-C stops cleanly through `ImageRequest.cancel` and prints how to resume; a second Ctrl-C quits at once (not hand-tested with a real terminal)
+- [x] Documented exit codes: 0 complete, 2 usage, 3 stopped or device removed, 4 verify mismatch, 5 finished with unrecovered data (docs/USAGE.md; 0, 2, 4 tested end to end, 3 and 5 need a device)
+- [x] `--json` output for image, carve, verify, list-devices, mapfile (docs/USAGE.md; tested)
+- [ ] `--json` for `analyze`
+- [x] `--mapfile` defaults to `<output>.map`; "Phase 1/2" wording dropped; `analyze --extract` help fixed
+- [x] Tunables: `--timeout`, `--chunk-kib`, `--no-reset`
+- [ ] More tunables: `--min-score`, `--types`; optional `tpt-usb-rescue.toml`
+- [x] `image --hash` hashes the finished image into `<output>.sha256`; `verify` checks it (tested)
+- [x] Per-file SHA-256 in the carve `index.csv`; `verify` checks it (older indexes still read)
+- [x] `carve` and `analyze` say "N more" when they truncate their listings; names from images are printed with control characters removed
+- [ ] Shell completions (`completions <shell>`) and man pages
+
+## 11. CI and release automation
+- [x] CI: macOS job, `--locked`, rust-cache, `cargo deny`, scheduled advisory check (`security.yml`), fuzz build-only job, `cargo doc -D warnings`, doc tests (workflows written; not yet run on GitHub)
+- [ ] CI: run MSRV tests, not just `cargo check`
+- [x] CI: push only on master, cancel superseded runs; dependabot added
+- [x] Tag-triggered release workflow (`release.yml`): Windows zip with the GUI, Linux and macOS (Apple silicon and Intel) tarballs, SHA256SUMS, GitHub Release from the CHANGELOG; refuses a tag that does not match the crate version (not yet run: push a `v0.1.0-rc.1` tag to test it)
+- [ ] Release: Linux aarch64 build, and a docs/release checklist update
+- [x] `cargo-binstall` metadata (CLI crate)
+- [ ] Decide `publish` for the GUI crate; consider release-plz
+- [x] `.gitattributes` (`* text=auto eol=lf`)
+
+## 12. Adoption: docs, examples, templates, packaging
+- [x] README install section
+- [ ] README: badges, GUI screenshot or GIF, 60-second quickstart with real output; fix "macOS later" (done) and add the GUI to the crate table (done)
+- [x] Fix the stray `` `r`n `` in CHANGELOG.md line 11
+- [x] `examples/`: `make-test-image` (bash and PowerShell; a noise image with hidden PNGs and a GIF), `recover.sh` / `recover.ps1` (image, analyze, carve, verify; resumes on re-run), chain-of-custody template (all run here)
+- [ ] `examples/`: a practice image with a real FAT32/NTFS filesystem and deleted files (needs a way to build one without mkfs); sample config once a config file exists
+- [x] docs: `docs/TROUBLESHOOTING.md`, exit-code table in USAGE.md
+- [ ] docs: failing-drive playbook (physical handling, when to stop), worked walkthrough with real output
+- [ ] Packaging: Scoop, winget, Homebrew tap, AUR, `.deb`, Docker recipe (`--device /dev/sdX`)
+- [x] Issue and PR templates
+
+## 13. Ideas (post-1.0)
+- [ ] Recovery report (HTML/JSON): bad-sector heatmap, per-file intact/damaged score, hashes; doubles as chain of custody
+- [ ] Adaptive imaging: health probe, speed-collapse detection, cool-down pauses
+- [ ] Auto-resume when the device is plugged back in
+- [ ] Browse the image read-only (FUSE/WinFsp or local web UI) before extracting
+- [ ] Batch mode for repair shops (queue of devices, CSV/JSON summary)
+- [ ] ddrescue mapfile import and `--compare` of two runs
+
 ## Decisions
 - No external `tpt-*` crates (tpt-media, tpt-math, tpt-archon). Validation and hashing are implemented in-repo / with generic crates (blake3, sha2, memmap2).
 - Dependency licenses: a crate is accepted when one of its licenses is permissive and listed in `deny.toml`. Crates offered only under Apache-2.0 are rejected.

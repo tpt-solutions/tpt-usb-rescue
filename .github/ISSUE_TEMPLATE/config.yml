@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem
+    url: https://github.com/tpt-solutions/tpt-usb-rescue/blob/master/SECURITY.md
+    about: Please follow SECURITY.md instead of opening a public issue.
