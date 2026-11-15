@@ -540,6 +540,8 @@ mod tests {
         max_read: Option<usize>,
         /// Fails every read with this kind of error, simulating a permission or argument fault.
         fail_with: Option<io::ErrorKind>,
+        /// Sectors from `bad` that the drive has started answering again (a test sets these).
+        repaired: std::sync::Mutex<HashSet<u64>>,
     }
 
     impl MockDev {
@@ -554,6 +556,7 @@ mod tests {
                 disconnect_after_reads: None,
                 max_read: None,
                 fail_with: None,
+                repaired: std::sync::Mutex::new(HashSet::new()),
             }
         }
     }
@@ -581,9 +584,11 @@ mod tests {
                 std::thread::sleep(self.hang_for);
                 return Err(io::Error::other("hung then failed").into());
             }
-            if (first..last).any(|s| self.bad.contains(&s)) {
+            let repaired = self.repaired.lock().unwrap();
+            if (first..last).any(|s| self.bad.contains(&s) && !repaired.contains(&s)) {
                 return Err(io::Error::other("simulated media error").into());
             }
+            drop(repaired);
             let start = offset as usize;
             if start >= self.data.len() {
                 return Ok(0);
@@ -702,6 +707,42 @@ mod tests {
                 assert_eq!(got, &data[s * 512..(s + 1) * 512], "sector {s}");
             }
         }
+    }
+
+    #[test]
+    fn pass_three_recovers_the_edges_of_a_bad_run_once_the_drive_answers() {
+        let data = pattern(64, 512);
+        let bad: HashSet<u64> = [10u64, 11, 12].into_iter().collect();
+        let dev = Arc::new(MockDev::new(data.clone(), bad));
+        let map = Mapfile::open_or_create(&tmp("pass3.map"), 512, 64).unwrap();
+        let img_path = tmp("pass3.img");
+        let out = OutputImage::create(&img_path, 64 * 512).unwrap();
+        let mut eng = Engine::new(Arc::clone(&dev), map, out, cfg_small()).unwrap();
+
+        eng.run_pass(1).unwrap();
+        eng.run_pass(2).unwrap();
+        let before = eng.totals();
+        assert_eq!(
+            before.bad,
+            3 * 512,
+            "passes 1 and 2 leave the whole run bad"
+        );
+
+        // The drive starts answering for the first and last sectors of the run only.
+        dev.repaired.lock().unwrap().extend([10u64, 12]);
+        eng.run_pass(3).unwrap();
+        let after = eng.totals();
+        assert_eq!(after.bad, 512, "only the middle sector stays bad");
+        assert_eq!(after.recovered, before.recovered + 2 * 512);
+
+        eng.finish().unwrap();
+        let img = std::fs::read(&img_path).unwrap();
+        assert_eq!(&img[10 * 512..11 * 512], &data[10 * 512..11 * 512]);
+        assert_eq!(&img[12 * 512..13 * 512], &data[12 * 512..13 * 512]);
+        assert!(
+            img[11 * 512..12 * 512].iter().all(|&b| b == 0),
+            "unrecovered sector is zero-filled"
+        );
     }
 
     #[test]
