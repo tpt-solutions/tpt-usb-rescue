@@ -69,8 +69,9 @@ then claim data that is no longer there.
 A read that does not finish within 5 seconds (`--timeout`) counts as a media failure, and the run
 carries on. On Linux the tool also asks the kernel to re-enumerate the USB device behind the disk
 (needs root), once per hang. After a reset the device handle is invalid, so the run stops. Re-run
-with `--resume`. If 10 reads in a row time out, the device is treated as dead and the run stops
-with progress saved.
+with `--resume`. If 5 reads in a row time out, the tool re-reads a sector it already recovered: if
+that works, the drive just hangs on a bad area and the run carries on; if not, the drive has
+stopped answering and the run stops with progress saved.
 
 ### Mapfile
 

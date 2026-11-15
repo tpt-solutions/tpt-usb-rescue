@@ -39,9 +39,12 @@ const REMOVED_CODES: &[i32] = &[19, 6, 108, 123];
 #[cfg(not(any(windows, target_os = "linux")))]
 const REMOVED_CODES: &[i32] = &[19, 6];
 
-/// Consecutive timed-out reads after which the run gives up. Each timeout abandons a thread stuck
-/// in the kernel along with its buffer, so a dead device must not be allowed to pile them up.
-const MAX_TIMEOUT_STREAK: u32 = 10;
+/// After this many timed-out reads in a row the engine checks whether the device still answers at
+/// all, by re-reading a sector it has already recovered. A drive that hangs on a bad area still
+/// answers elsewhere, so the run goes on; one that cannot read a known-good sector is dead, and
+/// the run stops with progress saved. Each timeout abandons a thread stuck in the kernel along
+/// with its buffer, so a dead device must not be allowed to pile them up.
+const TIMEOUT_STREAK_CHECK: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fault {
@@ -392,6 +395,34 @@ impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
         Ok(())
     }
 
+    /// Whether the device still reads a sector that was recovered earlier. False when nothing has
+    /// been recovered yet, since there is then nothing to show that the drive ever worked.
+    fn device_answers(&mut self) -> bool {
+        let Some(sector) = self
+            .map
+            .regions_with(BlockStatus::Recovered)
+            .first()
+            .map(|r| r.start_sector)
+        else {
+            return false;
+        };
+        let ss = u64::from(self.geo.sector_size);
+        let req = ReadRequest {
+            offset: sector * ss,
+            len: ss as usize,
+            align: (self.geo.sector_size as usize).max(4096),
+        };
+        match self.reader.read(req, self.cfg.read_timeout) {
+            ReaderOutcome::Done(Ok((_, n))) => n > 0,
+            // An error reply is still a reply; only an unplug means the device is gone.
+            ReaderOutcome::Done(Err(e)) => classify(&e) != Fault::Removed,
+            ReaderOutcome::TimedOut | ReaderOutcome::Stopped => {
+                self.reader = Reader::spawn(Arc::clone(&self.dev));
+                false
+            }
+        }
+    }
+
     /// Reads `n` sectors at `start`, retrying media faults and timeouts.
     fn read_block(&mut self, start: u64, n: u64, retries: u32) -> Result<Read, EngineError> {
         let ss = u64::from(self.geo.sector_size);
@@ -413,9 +444,6 @@ impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
                 ReaderOutcome::Done(Err(err)) => err,
                 ReaderOutcome::TimedOut => {
                     self.timeout_streak += 1;
-                    if self.timeout_streak > MAX_TIMEOUT_STREAK {
-                        return Err(EngineError::Unresponsive { sector: start });
-                    }
                     // Reset once per hang, not on every retry of the same stuck device.
                     if self.timeout_streak == 1 {
                         if let Some(hook) = self.reset_hook.as_mut() {
@@ -427,6 +455,13 @@ impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
                     // The read is stuck inside the device. Leave that thread to finish on its
                     // own and continue with a fresh reader.
                     self.reader = Reader::spawn(Arc::clone(&self.dev));
+                    if self.timeout_streak >= TIMEOUT_STREAK_CHECK {
+                        if self.device_answers() {
+                            self.timeout_streak = 0; // a hung area, not a dead drive
+                        } else {
+                            return Err(EngineError::Unresponsive { sector: start });
+                        }
+                    }
                     HalError::Io(io::Error::new(io::ErrorKind::TimedOut, "read timed out"))
                 }
                 ReaderOutcome::Stopped => {
@@ -788,6 +823,36 @@ mod tests {
         let err = eng.run_pass(1).unwrap_err();
         assert!(matches!(err, EngineError::Unresponsive { .. }), "{err}");
         assert_eq!(calls.load(Ordering::SeqCst), 1, "reset fires once per hang");
+    }
+
+    #[test]
+    fn a_long_hung_area_does_not_stop_the_run() {
+        // 20 hung sectors in a row cost far more than TIMEOUT_STREAK_CHECK timeouts, but the
+        // rest of the device answers, so the run must carry on and mark only those sectors bad.
+        let data = pattern(128, 512);
+        let mut dev = MockDev::new(data.clone(), HashSet::new());
+        dev.hang = (40..60u64).collect();
+        dev.hang_for = Duration::from_millis(300);
+        let map = Mapfile::open_or_create(&tmp("hungarea.map"), 512, 128).unwrap();
+        let img_path = tmp("hungarea.img");
+        let out = OutputImage::create(&img_path, 128 * 512).unwrap();
+        let cfg = EngineConfig {
+            read_timeout: Duration::from_millis(15),
+            ..cfg_small()
+        };
+        let mut eng = Engine::new(Arc::new(dev), map, out, cfg).unwrap();
+        for p in 1..=3 {
+            eng.run_pass(p)
+                .expect("the run must not give up on a hung area");
+        }
+        let t = eng.totals();
+        assert_eq!(t.bad, 20 * 512);
+        assert_eq!(t.recovered, 108 * 512);
+        eng.finish().unwrap();
+        let img = std::fs::read(&img_path).unwrap();
+        assert_eq!(&img[..40 * 512], &data[..40 * 512]);
+        assert!(img[40 * 512..60 * 512].iter().all(|&b| b == 0));
+        assert_eq!(&img[60 * 512..], &data[60 * 512..]);
     }
 
     #[test]

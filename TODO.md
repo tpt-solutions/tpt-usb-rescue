@@ -84,7 +84,7 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 - [x] Short reads queue the unread tail for the next pass (tested)
 - [x] Image is fsynced before the mapfile records data as recovered
 - [x] Per-OS device-removal error codes (EIO stays a media error; tested)
-- [x] Stop after 10 consecutive timed-out reads (no more leaked reader threads); USB reset fires once per hang (tested)
+- [x] Hung reads: after 5 timeouts in a row the engine re-reads a recovered sector; a hung area is survived, a dead drive stops the run (tested; also on Linux with a device-mapper delay target)
 - [x] exFAT NoFatChain directories read beyond the first cluster (tested)
 - [x] NTFS/FAT32/exFAT: checked arithmetic and allocation caps on hostile input
 - [x] Fuzz targets re-run with overflow checks and valid seed volumes (`fuzz/seeds`, `fuzz/README.md`). The first seeded run found an exFAT out-of-memory (cluster count larger than the image), fixed with a regression test. Unseeded runs had covered only ~30 edges and found nothing

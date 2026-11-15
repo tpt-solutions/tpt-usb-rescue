@@ -41,7 +41,7 @@ new image and map.
 
 ## The run stopped: "device removed" or "stopped responding"
 
-The drive disconnected or stopped answering (ten reads in a row timed out). Progress is saved.
+The drive disconnected, or stopped answering (several reads in a row timed out and it could no longer re-read a sector it had already recovered). Progress is saved.
 
 1. Unplug it, wait a few seconds, and plug it back in, directly into the computer rather than
    through a hub. Try another port or cable.

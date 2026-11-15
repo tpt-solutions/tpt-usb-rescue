@@ -12,7 +12,7 @@ uses semantic versioning once 1.0.0 is released.
 - The system-disk and output-on-source guards now cover partitions and volumes, and resolve LVM, LUKS, md and btrfs to the physical disk (Linux), slices (macOS) and `\\.\X:` volumes (Windows).
 - The imager syncs the image before the mapfile records data as recovered; short reads no longer leave sectors untested; device-removal error codes are per-OS.
 - A damaged record in the middle of a mapfile no longer discards every later record.
-- A run now stops after 10 consecutive timed-out reads instead of leaking reader threads, and the USB reset fires once per hang.
+- Hung reads: the USB reset fires once per hang, and after 5 timed-out reads in a row the run checks that the drive can still read a sector it already recovered. If it can, the run carries on past the hung area; if not, it stops with progress saved. (A first version gave up on any hung area longer than a few sectors; real device-mapper testing caught that.)
 - exFAT directories stored without a FAT chain are read in full; backup boot sectors are no longer reported as volumes; NTFS, FAT32 and exFAT parsers use checked arithmetic and bounded allocations.
 - The carver picks the right end record for ZIPs that contain stored ZIPs and caps files with no end marker at 256 MiB.
 - `verify` rejects `index.csv` entries that name files outside the output folder; `mapfile --out` never overwrites.
