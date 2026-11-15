@@ -74,4 +74,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-fuzz
-      - run: cargo fuzz build
+      # Pinned to the GNU target: the prebuilt cargo-fuzz from taiki-e is a musl binary, and it
+      # would otherwise default to x86_64-unknown-linux-musl, where the sanitizer cannot link
+      # against the static libc.
+      - run: cargo fuzz build --target x86_64-unknown-linux-gnu
