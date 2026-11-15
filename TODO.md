@@ -88,7 +88,7 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 - [x] exFAT NoFatChain directories read beyond the first cluster (tested)
 - [x] NTFS/FAT32/exFAT: checked arithmetic and allocation caps on hostile input
 - [ ] Run the fuzz targets again with overflow checks (debug build) after the fs hardening
-- [x] `detect()` ignores backup boot sectors (no test yet)
+- [x] `detect()` ignores backup boot sectors (tested)
 - [x] Mapfile: a damaged record in the middle is skipped (later records kept, user warned); failed writes roll back; `u32::MAX` clamp removed (tested)
 - [x] Carver: ZIP walk picks the end record with a consistent directory (stored inner ZIPs; tested); files with no end marker are capped at 256 MiB; `find_all` is lazy
 - [x] USB reset retries re-authorizing and reports how to recover if it fails
@@ -98,9 +98,10 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 - [x] `mapfile --export --out` never overwrites an existing file, including the mapfile itself (tested)
 - [ ] Pass 3 only retries the first and last sector of each bad run: either implement real trimming or fix the wording above
 - [ ] Passes 2 and 3 fsync twice per sector; batch them
-- [ ] FAT32 long names: validate the LFN checksum
+- [x] FAT32 long names: validate the LFN checksum, and keep the piece order of deleted names (tested)
 - [x] Tests added: resume with a truncated or missing image (end to end)
-- [ ] Tests still missing: hostile extract names end to end, backup-boot-sector dedupe, `Fault::Fatal` paths in the engine, pass 3 behaviour
+- [x] Tests added: backup boot sector dedupe, engine `Fatal` path leaves the map untouched
+- [ ] Tests still missing: hostile extract names end to end (needs a crafted image), pass 3 behaviour
 
 ## 10. CLI usability and automation
 - [x] Progress on stderr (percent, bytes, rate, ETA, bad bytes); non-TTY aware; `--quiet` (a `-v` flag is not added)
