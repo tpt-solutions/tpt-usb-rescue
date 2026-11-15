@@ -133,7 +133,8 @@ Findings come from a read-through of all crates. Fixed items are covered by test
 - [ ] README: GUI screenshot or GIF, 60-second quickstart with real output; fix "macOS later" (done) and add the GUI to the crate table (done)
 - [x] Fix the stray `` `r`n `` in CHANGELOG.md line 11
 - [x] `examples/`: `make-test-image` (bash and PowerShell; a noise image with hidden PNGs and a GIF), `recover.sh` / `recover.ps1` (image, analyze, carve, verify; resumes on re-run), chain-of-custody template (all run here)
-- [ ] `examples/`: a practice image with a real FAT32/NTFS filesystem and deleted files (needs a way to build one without mkfs); sample config once a config file exists
+- [x] `examples/practice-fat32.img`: a FAT32 volume with a long name, a subfolder and a deleted file (the fuzz seed, pinned by an end-to-end test)
+- [ ] `examples/`: an NTFS or exFAT practice image; sample config once a config file exists
 - [x] docs: `docs/TROUBLESHOOTING.md`, exit-code table in USAGE.md
 - [x] docs: failing-drive playbook (`docs/PLAYBOOK.md`)
 - [ ] docs: worked walkthrough with real output

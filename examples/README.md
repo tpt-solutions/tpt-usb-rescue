@@ -5,6 +5,7 @@ Everything here works with the downloaded program; nothing needs Rust or a build
 | File | What it does |
 |---|---|
 | `make-test-image.sh` / `.ps1` | Builds a small practice image (noise with two PNGs and a GIF hidden in it), so you can try the tool without a drive |
+| `practice-fat32.img` | A 32 KiB FAT32 volume with a long name, a subfolder and a deleted file, for trying `analyze --extract` |
 | `recover.sh` / `.ps1` | The whole recovery in one command: image, analyze, carve, verify. Safe to run again to resume |
 | `chain-of-custody.md` | A form to fill in when the recovery may be needed as evidence |
 
@@ -31,6 +32,25 @@ or `$env:TPT = ".\tpt-usb-rescue.exe"`.
 
 You should see three carved files, each with a score of 1.00, and `verify` ending in
 `3 checked, 0 failed`.
+
+## A practice image with a filesystem
+
+`practice-fat32.img` (32 KiB) is a tiny FAT32 volume, the kind of thing `analyze` reads when the
+filesystem is still intact. It holds a file with a long name, a file in a subfolder, a file spread
+over two clusters and one **deleted** file.
+
+```sh
+tpt-usb-rescue analyze practice-fat32.img --extract ./volumes
+ls -R volumes/volume_0
+#   HELLO.TXT  LongName.txt  CHAIN.BIN  DOCS/README.TXT  DELETED__ECRET.DAT
+```
+
+The deleted file comes out as `DELETED__ECRET.DAT`: FAT erases the first character of a name when
+a file is deleted, so the tool marks it with the `DELETED_` prefix and shows what is left. The
+contents of a deleted file survive only until something else uses its space. The image is a test
+fixture, so most files hold filler bytes; `HELLO.TXT` ("hello world"), `LongName.txt` ("long")
+and `DOCS/README.TXT` ("data") hold readable text. `recover.sh practice-fat32.img ./try-fat`
+runs the whole recovery on it.
 
 ## Doing it for real
 

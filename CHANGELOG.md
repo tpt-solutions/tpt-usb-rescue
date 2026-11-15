@@ -22,6 +22,7 @@ uses semantic versioning once 1.0.0 is released.
 ### Added
 - `completions <shell>` and `man [--out-dir DIR]` generate shell completions and manual pages; the release archives include them and the examples.
 - `--json` for `image`, `carve`, `verify`, `list-devices` and `mapfile`: one JSON object on stdout, messages on stderr. `carve` now records a SHA-256 for every file in `index.csv`, and `verify` checks it.
+- `examples/practice-fat32.img`: a small FAT32 volume with a deleted file to try `analyze --extract` on.
 - `examples/`: practice-image and one-command recovery scripts (bash and PowerShell) and a chain-of-custody form; `docs/TROUBLESHOOTING.md`; issue and pull request templates.
 - CLI: live progress on stderr (`-q` to silence), clean stop on Ctrl-C, documented exit codes (3 stopped, 4 verify failed, 5 unrecovered data), optional `--mapfile` (defaults to `<output>.map`), `--timeout`, `--chunk-kib`, `--no-reset` and `--hash` (writes `<output>.sha256`, checked by `verify`).
 - Carver covers the top 20 file types, with structural end detection and validators.

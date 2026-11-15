@@ -487,3 +487,37 @@ fn man_pages_are_written_one_per_command() {
         "options belong on the page"
     );
 }
+
+#[test]
+fn practice_filesystem_image_extracts_its_files() {
+    // examples/practice-fat32.img is shipped for people to try `analyze --extract` on.
+    let img = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/practice-fat32.img");
+    let dir = workdir("practice-fat32");
+    let r = run([
+        os("analyze"),
+        os(&img),
+        os("--extract"),
+        os(dir.join("vol")),
+    ]);
+    assert_eq!(
+        r.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+    let text = String::from_utf8_lossy(&r.stdout).to_string();
+    assert!(
+        text.contains("FAT32 at byte offset 0") && text.contains("1 deleted"),
+        "{text}"
+    );
+
+    let vol = dir.join("vol").join("volume_0");
+    assert_eq!(fs::read(vol.join("HELLO.TXT")).unwrap(), b"hello world");
+    assert_eq!(fs::read(vol.join("LongName.txt")).unwrap(), b"long");
+    assert_eq!(
+        fs::read(vol.join("DOCS").join("README.TXT")).unwrap(),
+        b"data"
+    );
+    // A deleted entry loses its first character on a FAT volume, and is marked by the prefix.
+    assert_eq!(fs::read(vol.join("DELETED__ECRET.DAT")).unwrap().len(), 300);
+}
