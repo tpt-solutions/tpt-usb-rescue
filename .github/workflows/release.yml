@@ -74,6 +74,16 @@ jobs:
           if [ "${{ matrix.gui }}" = "true" ]; then cp "$out/tpt-usb-rescue-gui$ext" "dist/$name/"; fi
           cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
           cp docs/USAGE.md "dist/$name/USAGE.md"
+          cp -r examples "dist/$name/examples"
+          # Man pages and shell completions come from the binary itself. The Intel macOS build is
+          # cross-compiled on an Apple-silicon runner, so its binary is not run here.
+          if [ "${{ matrix.target }}" != "x86_64-apple-darwin" ]; then
+            "$out/tpt-usb-rescue$ext" man --out-dir "dist/$name/man"
+            mkdir -p "dist/$name/completions"
+            for shell in bash zsh fish powershell; do
+              "$out/tpt-usb-rescue$ext" completions "$shell" > "dist/$name/completions/tpt-usb-rescue.$shell"
+            done
+          fi
           cd dist
           if [[ "${{ matrix.target }}" == *windows* ]]; then
             7z a "$name.zip" "$name" > /dev/null
