@@ -24,9 +24,24 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 use tpt_usb_rescue_hal::{AlignedBuf, DeviceGeometry, HalError, RawDevice};
 
-/// Windows and Linux error codes meaning the device has gone away.
-/// Linux: ENXIO (6), ENODEV (19). Windows: ERROR_NO_SUCH_DEVICE (433), ERROR_DEVICE_NOT_CONNECTED (1167).
-const REMOVED_CODES: &[i32] = &[6, 19, 433, 1167];
+/// OS error codes meaning the device has gone away. The numbers mean different things per OS
+/// (Windows 6 is an invalid handle and 19 is write-protect), so each OS has its own table.
+/// EIO is deliberately absent: it is also what a genuinely bad sector reports.
+///
+/// Windows: ERROR_NO_SUCH_DEVICE (433), ERROR_DEVICE_NOT_CONNECTED (1167),
+/// ERROR_DEV_NOT_EXIST (55), ERROR_NO_MEDIA_IN_DRIVE (1112).
+#[cfg(windows)]
+const REMOVED_CODES: &[i32] = &[433, 1167, 55, 1112];
+/// Linux: ENXIO (6), ENODEV (19), ESHUTDOWN (108), ENOMEDIUM (123).
+#[cfg(target_os = "linux")]
+const REMOVED_CODES: &[i32] = &[19, 6, 108, 123];
+/// macOS: ENXIO (6), ENODEV (19).
+#[cfg(not(any(windows, target_os = "linux")))]
+const REMOVED_CODES: &[i32] = &[19, 6];
+
+/// Consecutive timed-out reads after which the run gives up. Each timeout abandons a thread stuck
+/// in the kernel along with its buffer, so a dead device must not be allowed to pile them up.
+const MAX_TIMEOUT_STREAK: u32 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fault {
@@ -96,6 +111,10 @@ pub enum EngineError {
     Output(io::Error),
     #[error("device removed at sector {sector}; progress saved, re-run with --resume to continue")]
     DeviceRemoved { sector: u64 },
+    #[error(
+        "device stopped responding at sector {sector}; progress saved, replug it and re-run with --resume"
+    )]
+    Unresponsive { sector: u64 },
     #[error("fatal error at sector {sector}: {source}")]
     Fatal { sector: u64, source: HalError },
     #[error("stopped by the user; progress saved")]
@@ -180,6 +199,8 @@ pub struct Engine<D: RawDevice + Send + Sync + 'static> {
     reset_hook: Option<ResetHook>,
     last_reset_error: Option<String>,
     cancel: Option<Arc<AtomicBool>>,
+    /// Timed-out reads in a row; reset whenever the device answers.
+    timeout_streak: u32,
 }
 
 impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
@@ -216,6 +237,7 @@ impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
             progress: None,
             reset_hook: None,
             last_reset_error: None,
+            timeout_streak: 0,
             cancel: None,
         })
     }
@@ -382,14 +404,24 @@ impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
                 align,
             };
             let outcome = self.reader.read(req, self.cfg.read_timeout);
+            if !matches!(outcome, ReaderOutcome::TimedOut) {
+                self.timeout_streak = 0; // the device answered, even if with an error
+            }
             let err = match outcome {
                 ReaderOutcome::Done(Ok((_, 0))) => return Ok(Read::Media),
                 ReaderOutcome::Done(Ok((buf, bytes))) => return Ok(Read::Ok { buf, bytes }),
                 ReaderOutcome::Done(Err(err)) => err,
                 ReaderOutcome::TimedOut => {
-                    if let Some(hook) = self.reset_hook.as_mut() {
-                        if let Err(e) = hook(start) {
-                            self.last_reset_error = Some(e);
+                    self.timeout_streak += 1;
+                    if self.timeout_streak > MAX_TIMEOUT_STREAK {
+                        return Err(EngineError::Unresponsive { sector: start });
+                    }
+                    // Reset once per hang, not on every retry of the same stuck device.
+                    if self.timeout_streak == 1 {
+                        if let Some(hook) = self.reset_hook.as_mut() {
+                            if let Err(e) = hook(start) {
+                                self.last_reset_error = Some(e);
+                            }
                         }
                     }
                     // The read is stuck inside the device. Leave that thread to finish on its
@@ -434,7 +466,19 @@ impl<D: RawDevice + Send + Sync + 'static> Engine<D> {
         self.out
             .write_block(start * ss, &buf[..bytes])
             .map_err(EngineError::Output)?;
+        // Make the data durable before the map claims it, so a power cut can never leave a
+        // mapfile that says "recovered" for bytes that are still zeros on disk.
+        self.out.sync().map_err(EngineError::Output)?;
         self.map.set(start, covered, BlockStatus::Recovered)?;
+        // A short read leaves the tail of the request unread; queue it for the next pass
+        // instead of leaving it Untested.
+        if covered < requested {
+            self.map.set(
+                start + covered,
+                requested - covered,
+                BlockStatus::NonTrimmed,
+            )?;
+        }
         Ok(())
     }
 }
@@ -457,6 +501,8 @@ mod tests {
         hang_for: Duration,
         reads: AtomicU64,
         disconnect_after_reads: Option<u64>,
+        /// Caps the bytes returned per read, simulating short reads.
+        max_read: Option<usize>,
     }
 
     impl MockDev {
@@ -469,6 +515,7 @@ mod tests {
                 hang_for: Duration::from_millis(0),
                 reads: AtomicU64::new(0),
                 disconnect_after_reads: None,
+                max_read: None,
             }
         }
     }
@@ -484,7 +531,7 @@ mod tests {
         fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, HalError> {
             let n = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
             if self.disconnect_after_reads.is_some_and(|limit| n > limit) {
-                return Err(io::Error::from_raw_os_error(19).into()); // ENODEV
+                return Err(io::Error::from_raw_os_error(REMOVED_CODES[0]).into()); // device gone
             }
             let ss = u64::from(self.ss);
             let first = offset / ss;
@@ -500,7 +547,8 @@ mod tests {
             if start >= self.data.len() {
                 return Ok(0);
             }
-            let end = (start + buf.len()).min(self.data.len());
+            let want = self.max_read.map_or(buf.len(), |m| m.min(buf.len()));
+            let end = (start + want).min(self.data.len());
             buf[..end - start].copy_from_slice(&self.data[start..end]);
             Ok(end - start)
         }
@@ -527,6 +575,20 @@ mod tests {
             trim_retries: 2,
             read_timeout: Duration::from_secs(5),
         }
+    }
+
+    #[test]
+    fn short_reads_leave_no_untested_sectors() {
+        let data = pattern(64, 512);
+        let mut dev = MockDev::new(data, HashSet::new());
+        dev.max_read = Some(3 * 512);
+        let map = Mapfile::open_or_create(&tmp("short.map"), 512, 64).unwrap();
+        let out = OutputImage::create(&tmp("short.img"), 64 * 512).unwrap();
+        let mut eng = Engine::new(Arc::new(dev), map, out, cfg_small()).unwrap();
+        let t = eng.run_pass(1).unwrap();
+        assert_eq!(t.untested, 0, "unread tails must not stay Untested");
+        assert_eq!(t.recovered + t.non_trimmed, 64 * 512);
+        assert!(t.non_trimmed > 0);
     }
 
     #[test]
@@ -678,6 +740,30 @@ mod tests {
     }
 
     #[test]
+    fn dead_device_gives_up_after_a_streak_of_timeouts() {
+        let data = pattern(256, 512);
+        let mut dev = MockDev::new(data, HashSet::new());
+        dev.hang = (0..256u64).collect();
+        dev.hang_for = Duration::from_millis(400);
+        let map = Mapfile::open_or_create(&tmp("dead.map"), 512, 256).unwrap();
+        let out = OutputImage::create(&tmp("dead.img"), 256 * 512).unwrap();
+        let cfg = EngineConfig {
+            read_timeout: Duration::from_millis(20),
+            ..cfg_small()
+        };
+        let mut eng = Engine::new(Arc::new(dev), map, out, cfg).unwrap();
+        let calls = Arc::new(AtomicU64::new(0));
+        let seen = Arc::clone(&calls);
+        eng.set_reset_hook(Box::new(move |_| {
+            seen.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }));
+        let err = eng.run_pass(1).unwrap_err();
+        assert!(matches!(err, EngineError::Unresponsive { .. }), "{err}");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "reset fires once per hang");
+    }
+
+    #[test]
     fn cancel_flag_stops_the_run_with_progress_saved() {
         let data = pattern(40, 512);
         let dev = Arc::new(MockDev::new(data, HashSet::new()));
@@ -693,13 +779,18 @@ mod tests {
     #[test]
     fn classify_maps_codes_as_expected() {
         assert_eq!(classify(&io::Error::other("media").into()), Fault::Media);
+        for code in REMOVED_CODES {
+            assert_eq!(
+                classify(&io::Error::from_raw_os_error(*code).into()),
+                Fault::Removed,
+                "code {code}"
+            );
+        }
+        // EIO is what a bad sector reports on Linux; it must not look like an unplug.
+        #[cfg(unix)]
         assert_eq!(
-            classify(&io::Error::from_raw_os_error(19).into()),
-            Fault::Removed
-        );
-        assert_eq!(
-            classify(&io::Error::from_raw_os_error(433).into()),
-            Fault::Removed
+            classify(&io::Error::from_raw_os_error(5).into()),
+            Fault::Media
         );
         assert_eq!(
             classify(&io::Error::from(io::ErrorKind::PermissionDenied).into()),

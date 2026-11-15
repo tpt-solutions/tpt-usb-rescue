@@ -57,6 +57,7 @@ pub struct Mapfile {
     runs: BTreeMap<u64, Run>,
     /// Count of records replayed on open; useful for diagnostics.
     replayed_records: u64,
+    skipped_records: u64,
 }
 
 impl Mapfile {
@@ -95,6 +96,7 @@ impl Mapfile {
                 sector_count,
                 runs: BTreeMap::new(),
                 replayed_records: 0,
+                skipped_records: 0,
             });
         }
 
@@ -122,20 +124,35 @@ impl Mapfile {
 
         let mut runs = BTreeMap::new();
         let mut replayed = 0u64;
-        let mut good_len = HEADER_LEN;
-        for rec in bytes[HEADER_LEN..].chunks(RECORD_LEN) {
-            if rec.len() < RECORD_LEN {
-                break; // torn tail
+        let mut skipped = 0u64;
+        // Records are fixed-size and individually checksummed, so a damaged record in the middle
+        // can be skipped without losing the valid records after it. Only damage at the very end
+        // (a torn write) is cut off, so that new appends follow a valid record.
+        let decoded: Vec<Option<(u64, u64, BlockStatus)>> = bytes[HEADER_LEN..]
+            .chunks(RECORD_LEN)
+            .map(|rec| {
+                if rec.len() < RECORD_LEN {
+                    None
+                } else {
+                    decode_record(rec)
+                }
+            })
+            .collect();
+        let valid_prefix = decoded
+            .iter()
+            .rposition(Option::is_some)
+            .map_or(0, |i| i + 1);
+        for rec in &decoded[..valid_prefix] {
+            match rec {
+                Some((start, len, status)) => {
+                    apply(&mut runs, *start, *len, *status);
+                    replayed += 1;
+                }
+                None => skipped += 1,
             }
-            let Some((start, len, status)) = decode_record(rec) else {
-                break; // corrupt record: everything after it is untrusted
-            };
-            apply(&mut runs, start, len, status);
-            replayed += 1;
-            good_len += RECORD_LEN;
         }
+        let good_len = HEADER_LEN + valid_prefix * RECORD_LEN;
         if good_len != bytes.len() {
-            // Drop the torn/corrupt tail so new appends follow a valid record.
             file.set_len(good_len as u64)?;
             file.sync_all()?;
         }
@@ -148,6 +165,7 @@ impl Mapfile {
             sector_count,
             runs,
             replayed_records: replayed,
+            skipped_records: skipped,
         })
     }
 
@@ -182,6 +200,12 @@ impl Mapfile {
         self.replayed_records
     }
 
+    /// Damaged records found in the middle of the file and skipped during replay. Their sectors
+    /// fall back to an older state, so they get read again rather than trusted.
+    pub fn skipped_records(&self) -> u64 {
+        self.skipped_records
+    }
+
     /// Marks `len` sectors starting at `start` with `status`, appending a durable record.
     ///
     /// The record is written but not synced; call [`Mapfile::sync`] at checkpoints.
@@ -197,17 +221,28 @@ impl Mapfile {
                 count: self.sector_count,
             });
         };
-        // Split the in-memory map in the same way replay will, so both stay identical.
-        let len_u32 = len.min(u64::from(u32::MAX)) as u32;
-        let mut remaining = u64::from(len_u32);
+        // Encode every record first and write them in one call, so a failed write can be rolled
+        // back instead of leaving a misaligned file that later appends cannot recover from.
+        let mut buf = Vec::new();
+        let mut parts = Vec::new();
+        let mut remaining = len;
         let mut cursor = start;
         while remaining > 0 {
             let chunk = remaining.min(u64::from(u32::MAX)) as u32;
-            let rec = encode_record(cursor, chunk, status);
-            self.file.write_all(&rec)?;
-            apply(&mut self.runs, cursor, u64::from(chunk), status);
+            buf.extend_from_slice(&encode_record(cursor, chunk, status));
+            parts.push((cursor, u64::from(chunk)));
             cursor += u64::from(chunk);
             remaining -= u64::from(chunk);
+        }
+        let pos = self.file.stream_position()?;
+        if let Err(e) = self.file.write_all(&buf) {
+            // Best effort: cut off whatever part of the batch reached the file.
+            let _ = self.file.set_len(pos);
+            let _ = self.file.seek(SeekFrom::Start(pos));
+            return Err(e.into());
+        }
+        for (cursor, chunk) in parts {
+            apply(&mut self.runs, cursor, chunk, status);
         }
         Ok(())
     }
@@ -500,6 +535,37 @@ mod tests {
         let m = Mapfile::open_or_create(&p, 512, 100).unwrap();
         assert_eq!(m.replayed_records(), 1);
         assert_eq!(m.status_of(4), BlockStatus::Untested);
+    }
+
+    #[test]
+    fn corrupt_record_in_the_middle_is_skipped_not_fatal() {
+        let p = temp("corrupt-mid.map");
+        {
+            let mut m = Mapfile::open_or_create(&p, 512, 100).unwrap();
+            m.set(0, 4, BlockStatus::Recovered).unwrap();
+            m.set(4, 4, BlockStatus::Recovered).unwrap();
+            m.set(8, 4, BlockStatus::Recovered).unwrap();
+            m.sync().unwrap();
+        }
+        let mut bytes = std::fs::read(&p).unwrap();
+        bytes[HEADER_LEN + RECORD_LEN + 2] ^= 0xFF; // damage the middle record only
+        std::fs::write(&p, &bytes).unwrap();
+        let len_before = bytes.len() as u64;
+        let m = Mapfile::open_or_create(&p, 512, 100).unwrap();
+        assert_eq!(m.replayed_records(), 2);
+        assert_eq!(m.skipped_records(), 1);
+        assert_eq!(m.status_of(0), BlockStatus::Recovered);
+        assert_eq!(
+            m.status_of(4),
+            BlockStatus::Untested,
+            "lost record is re-read"
+        );
+        assert_eq!(
+            m.status_of(8),
+            BlockStatus::Recovered,
+            "later records survive"
+        );
+        assert_eq!(std::fs::metadata(&p).unwrap().len(), len_before);
     }
 
     #[test]
