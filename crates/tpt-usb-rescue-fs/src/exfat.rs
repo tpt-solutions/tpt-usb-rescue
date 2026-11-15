@@ -18,6 +18,14 @@ pub struct ExFat<'a> {
     root_cluster: u32,
 }
 
+/// Where a directory's data lives: its first cluster, stored length, and NoFatChain flag.
+#[derive(Clone, Copy)]
+struct DirLoc {
+    first: u32,
+    size: u64,
+    contiguous: bool,
+}
+
 impl<'a> ExFat<'a> {
     pub fn open(img: &'a [u8], base: usize) -> Result<Self, FsError> {
         let b = slice(img, base, 512)?;
@@ -102,9 +110,11 @@ impl<'a> ExFat<'a> {
         }
     }
 
-    fn dir_bytes(&self, first: u32) -> Vec<u8> {
+    /// Reads a directory's bytes. A NoFatChain directory (`contiguous`) has no FAT chain, so its
+    /// clusters come from its stored length instead.
+    fn dir_bytes(&self, first: u32, size: u64, contiguous: bool) -> Vec<u8> {
         let mut out = Vec::new();
-        for c in self.chain(first) {
+        for c in self.clusters_for(first, size, contiguous) {
             let Some(off) = self.cluster_abs(c) else {
                 continue;
             };
@@ -117,7 +127,7 @@ impl<'a> ExFat<'a> {
 
     fn walk(
         &self,
-        first: u32,
+        dir: DirLoc,
         prefix: &str,
         depth: u32,
         seen: &mut HashSet<u32>,
@@ -126,7 +136,7 @@ impl<'a> ExFat<'a> {
         if depth > MAX_DEPTH {
             return;
         }
-        let dir = self.dir_bytes(first);
+        let dir = self.dir_bytes(dir.first, dir.size, dir.contiguous);
         let mut i = 0usize;
         while i + 32 <= dir.len() {
             let t = dir[i];
@@ -179,7 +189,12 @@ impl<'a> ExFat<'a> {
                 contiguous,
             });
             if is_dir && !deleted && first_cluster >= 2 && seen.insert(first_cluster) {
-                self.walk(first_cluster, &path, depth + 1, seen, out);
+                let sub = DirLoc {
+                    first: first_cluster,
+                    size,
+                    contiguous,
+                };
+                self.walk(sub, &path, depth + 1, seen, out);
             }
             i = set_end;
         }
@@ -195,7 +210,12 @@ impl Filesystem for ExFat<'_> {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
         seen.insert(self.root_cluster);
-        self.walk(self.root_cluster, "", 0, &mut seen, &mut out);
+        let root = DirLoc {
+            first: self.root_cluster,
+            size: 0,
+            contiguous: false,
+        };
+        self.walk(root, "", 0, &mut seen, &mut out);
         out
     }
 
@@ -204,7 +224,7 @@ impl Filesystem for ExFat<'_> {
             return Err(FsError::IsDirectory);
         }
         let want = e.size as usize;
-        let mut out = Vec::with_capacity(want.min(1 << 30));
+        let mut out = Vec::with_capacity(want.min(self.img.len()));
         for c in self.clusters_for(e.first_cluster, e.size, e.contiguous) {
             if out.len() >= want {
                 break;
@@ -287,6 +307,7 @@ mod tests {
         dir.extend(set("note.txt", 3, 600, false, false, true));
         dir.extend(set("gone.bin", 5, 200, true, false, false));
         dir.extend(set("photos", 6, 0, false, true, true));
+        dir.extend(set("big", 8, 1024, true, true, true));
         img[root..root + dir.len()].copy_from_slice(&dir);
 
         // note.txt occupies clusters 3 and 4.
@@ -303,7 +324,28 @@ mod tests {
         let sub = set("a.jpg", 7, 3, true, false, true);
         img[cluster(6)..cluster(6) + sub.len()].copy_from_slice(&sub);
         img[cluster(7)..cluster(7) + 3].copy_from_slice(b"JPG");
+
+        // big/ is a NoFatChain directory spanning clusters 8 and 9 with no FAT chain. Its first
+        // cluster is filled with non-file entries; the real entry sits in the second cluster.
+        for k in 0..16 {
+            img[cluster(8) + k * 32] = 0x81;
+        }
+        let deep = set("deep.txt", 10, 4, true, false, true);
+        img[cluster(9)..cluster(9) + deep.len()].copy_from_slice(&deep);
+        img[cluster(10)..cluster(10) + 4].copy_from_slice(b"deep");
         img
+    }
+
+    #[test]
+    fn reads_nofatchain_directory_beyond_first_cluster() {
+        let img = build();
+        let fs = ExFat::open(&img, 0).unwrap();
+        let entries = fs.entries();
+        let deep = entries
+            .iter()
+            .find(|e| e.path == "/big/deep.txt")
+            .expect("entry in second cluster of a contiguous directory");
+        assert_eq!(fs.read(deep).unwrap(), b"deep");
     }
 
     #[test]

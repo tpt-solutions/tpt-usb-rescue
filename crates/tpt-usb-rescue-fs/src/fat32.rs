@@ -225,7 +225,7 @@ impl Filesystem for Fat32<'_> {
         } else {
             self.chain(e.first_cluster)
         };
-        let mut out = Vec::with_capacity(want.min(1 << 30));
+        let mut out = Vec::with_capacity(want.min(self.img.len()));
         for c in clusters {
             if out.len() >= want {
                 break;

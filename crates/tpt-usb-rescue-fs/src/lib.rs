@@ -93,10 +93,12 @@ pub fn open(image: &[u8], offset: u64) -> Result<Box<dyn Filesystem + '_>, FsErr
 /// returned in offset order. The scan is linear in the image size.
 pub fn detect(image: &[u8]) -> Vec<DetectedVolume> {
     let mut found = Vec::new();
+    // Offsets of backup boot sectors belonging to volumes already found; they are not volumes.
+    let mut backups = std::collections::HashSet::new();
     let mut off = 0usize;
     while off + 512 <= image.len() {
         let sector = &image[off..off + 512];
-        if sector[510..512] == [0x55, 0xAA] {
+        if sector[510..512] == [0x55, 0xAA] && !backups.contains(&off) {
             let kind = if &sector[3..11] == b"EXFAT   " {
                 Some(VolumeKind::ExFat)
             } else if &sector[3..11] == b"NTFS    " {
@@ -110,6 +112,9 @@ pub fn detect(image: &[u8]) -> Vec<DetectedVolume> {
                 // Confirm the full boot sector parses before reporting it.
                 let ok = open(image, off as u64).is_ok();
                 if ok {
+                    if let Some(b) = backup_boot_offset(sector, kind, off) {
+                        backups.insert(b);
+                    }
                     found.push(DetectedVolume {
                         offset: off as u64,
                         kind,
@@ -120,6 +125,31 @@ pub fn detect(image: &[u8]) -> Vec<DetectedVolume> {
         off += 512;
     }
     found
+}
+
+/// Where the backup copy of a volume's boot sector lives, as an image offset.
+fn backup_boot_offset(sector: &[u8], kind: VolumeKind, base: usize) -> Option<usize> {
+    let u16_at = |o: usize| usize::from(u16::from_le_bytes([sector[o], sector[o + 1]]));
+    match kind {
+        // BPB_BkBootSec, in sectors from the start of the volume.
+        VolumeKind::Fat32 => {
+            let bps = u16_at(11);
+            let bk = u16_at(50);
+            (bk > 0).then(|| base + bk * bps)
+        }
+        // The backup boot region starts 12 sectors in.
+        VolumeKind::ExFat => {
+            let shift = u32::from(*sector.get(108)?);
+            (9..=12).contains(&shift).then(|| base + (12usize << shift))
+        }
+        // NTFS keeps its copy in the last sector of the volume.
+        VolumeKind::Ntfs => {
+            let bps = u16_at(11);
+            let total = u64::from_le_bytes(sector[40..48].try_into().ok()?);
+            let off = usize::try_from(total).ok()?.checked_mul(bps)?;
+            base.checked_add(off)
+        }
+    }
 }
 
 /// A partition table entry from the MBR.

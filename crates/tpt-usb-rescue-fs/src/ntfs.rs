@@ -11,6 +11,8 @@
 use crate::{FileEntry, Filesystem, FsError, VolumeKind, le16, le32, le64, slice};
 use std::collections::HashMap;
 
+/// Longest sparse hole that `read_runs` will expand into zeros.
+const MAX_SPARSE_FILL: usize = 256 << 20;
 const RECORD_SIGNATURE: &[u8; 4] = b"FILE";
 const ATTR_FILE_NAME: u32 = 0x30;
 const ATTR_DATA: u32 = 0x80;
@@ -121,8 +123,15 @@ impl<'a> Ntfs<'a> {
 
     /// Reads all MFT records through the $MFT run list.
     fn load_records(&mut self) -> Result<(), FsError> {
-        let total_clusters: u64 = self.mft_runs.iter().map(|r| r.clusters).sum();
-        let total = total_clusters as usize * self.cluster_size;
+        // Corrupt run lists can claim absurd lengths: saturate, and never walk past the image.
+        let total_clusters = self
+            .mft_runs
+            .iter()
+            .fold(0u64, |acc, r| acc.saturating_add(r.clusters));
+        let total = usize::try_from(total_clusters)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(self.cluster_size)
+            .min(self.img.len().saturating_sub(self.base));
         let per_record = self.record_size;
         let mut number = 0u64;
         let mut virt = 0usize;
@@ -145,12 +154,14 @@ impl<'a> Ntfs<'a> {
     fn virtual_to_physical(&self, runs: &[Run], virt: usize, len: usize) -> Option<usize> {
         let mut remaining = virt as u64;
         for run in runs {
-            let run_bytes = run.clusters * self.cluster_size as u64;
+            let run_bytes = run.clusters.saturating_mul(self.cluster_size as u64);
             if remaining < run_bytes {
                 let lcn = run.lcn?;
-                let phys = lcn * self.cluster_size as u64 + remaining;
+                let phys = lcn
+                    .checked_mul(self.cluster_size as u64)?
+                    .checked_add(remaining)?;
                 // The record must lie inside this run.
-                if remaining + len as u64 > run_bytes {
+                if remaining.checked_add(len as u64)? > run_bytes {
                     return None;
                 }
                 return usize::try_from(phys).ok();
@@ -180,18 +191,32 @@ impl<'a> Ntfs<'a> {
 
     /// Reads the bytes described by a run list, limited to `size`.
     fn read_runs(&self, runs: &[Run], size: u64) -> Vec<u8> {
-        let mut out = Vec::with_capacity((size as usize).min(1 << 30));
+        let mut out = Vec::with_capacity((size as usize).min(self.img.len()));
         for run in runs {
             if out.len() as u64 >= size {
                 break;
             }
-            let want =
-                (size - out.len() as u64).min(run.clusters * self.cluster_size as u64) as usize;
+            let want = (size - out.len() as u64)
+                .min(run.clusters.saturating_mul(self.cluster_size as u64))
+                as usize;
             match run.lcn {
-                None => out.resize(out.len() + want, 0),
+                None => {
+                    // Sparse hole: a corrupt size must not make us allocate gigabytes of zeros.
+                    if want > MAX_SPARSE_FILL {
+                        break;
+                    }
+                    out.resize(out.len() + want, 0);
+                }
                 Some(lcn) => {
-                    let start = self.base + (lcn as usize) * self.cluster_size;
-                    match self.img.get(start..start + want) {
+                    let start = usize::try_from(lcn)
+                        .ok()
+                        .and_then(|l| l.checked_mul(self.cluster_size))
+                        .and_then(|o| o.checked_add(self.base));
+                    let Some(start) = start else { break };
+                    match start
+                        .checked_add(want)
+                        .and_then(|end| self.img.get(start..end))
+                    {
                         Some(bytes) => out.extend_from_slice(bytes),
                         None => break,
                     }
