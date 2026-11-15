@@ -28,7 +28,7 @@ tpt-usb-rescue-carver = { path = "crates/tpt-usb-rescue-carver", version = "0.1.
 tpt-usb-rescue-fs = { path = "crates/tpt-usb-rescue-fs", version = "0.1.0" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
-clap_mangen = "0.2"
+clap_mangen = "0.3"
 ctrlc = "3.5"
 thiserror = "2"
 memmap2 = "0.9"
