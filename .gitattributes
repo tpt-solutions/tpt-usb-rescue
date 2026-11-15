@@ -1,0 +1,7 @@
+# Keep line endings stable across platforms.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.rc text eol=crlf
+*.png binary
+*.ico binary
