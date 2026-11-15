@@ -131,7 +131,61 @@ pub(crate) fn path_on_device(path: &Path, device: &Path) -> Result<bool, HalErro
             return Ok(true);
         }
     }
-    Ok(false)
+    // An APFS volume (such as `/`) sits on a synthesized container disk, which has a different
+    // device number from the physical disk behind it. Follow the containers down with diskutil.
+    Ok(hosting_disks(path)?.contains(&name))
+}
+
+/// Upper bound on the containers followed under one path. Real systems need two or three.
+const MAX_DISKUTIL_VISITS: usize = 16;
+
+/// Every whole disk that stores `path`, found by asking `diskutil` about the volume and then about
+/// each container and store it names, until no new disks appear.
+///
+/// Fails rather than guessing when `diskutil` cannot answer: the caller then refuses the operation.
+fn hosting_disks(path: &Path) -> Result<Vec<String>, HalError> {
+    let start = fs::canonicalize(crate::safety::nearest_existing(path))?;
+    let mut todo = vec![start.to_string_lossy().into_owned()];
+    let mut seen: Vec<String> = Vec::new();
+    let mut visits = 0;
+    while let Some(node) = todo.pop() {
+        visits += 1;
+        if visits > MAX_DISKUTIL_VISITS {
+            return Err(HalError::Refused(format!(
+                "too many layers under {}; refusing to guess where it is stored",
+                path.display()
+            )));
+        }
+        let info = crate::diskutil::parse_info(&diskutil_info(&node)?);
+        let names = info
+            .identifier
+            .into_iter()
+            .chain(info.parent_whole_disk)
+            .chain(info.physical_stores);
+        for name in names {
+            let Some(whole) = crate::diskutil::whole_disk(&name) else {
+                continue;
+            };
+            if !seen.contains(&whole) {
+                todo.push(format!("/dev/{whole}"));
+                seen.push(whole);
+            }
+        }
+    }
+    Ok(seen)
+}
+
+/// Runs `diskutil info -plist` on a path or device node and returns its XML.
+fn diskutil_info(target: &str) -> Result<String, HalError> {
+    let out = std::process::Command::new("/usr/sbin/diskutil")
+        .args(["info", "-plist", target])
+        .output()?;
+    if !out.status.success() {
+        return Err(HalError::Refused(format!(
+            "diskutil could not describe {target}; refusing to guess where it is stored"
+        )));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 #[cfg(test)]

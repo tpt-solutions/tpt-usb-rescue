@@ -1,12 +1,13 @@
 //! Hardware abstraction layer: raw, cache-bypassing block device access.
 //!
 //! Platform backends: Linux (`O_DIRECT`), Windows (`FILE_FLAG_NO_BUFFERING`),
-//! macOS (raw `/dev/rdiskX`, post-1.0; currently reports [`HalError::Unsupported`]).
+//! macOS (raw `/dev/rdiskX`; type-checked only, not yet run on a Mac).
 //!
 //! Every handle is opened read-only. Nothing in this crate writes to a device.
 
 pub mod buf;
 pub mod devices;
+mod diskutil;
 mod mounts;
 pub mod safety;
 
