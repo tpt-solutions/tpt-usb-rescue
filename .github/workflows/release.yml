@@ -1,0 +1,130 @@
+name: Release
+
+# Push a tag such as v1.0.0 to build binaries and publish a GitHub Release.
+# A tag with a hyphen (v1.0.0-rc.1) is published as a pre-release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: check tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - id: v
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate=$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="tpt-usb-rescue"))')
+          if [ "$tag" != "$crate" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the crate version $crate"
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: check
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, gui: true }
+          # Built on an older image so the binary runs on older glibc.
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, gui: false }
+          - { target: aarch64-apple-darwin, os: macos-latest, gui: false }
+          - { target: x86_64-apple-darwin, os: macos-latest, gui: false }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "${{ matrix.target }}" }
+      - uses: Swatinem/rust-cache@v2
+        with: { key: "${{ matrix.target }}" }
+      - name: Test
+        # The Intel macOS binary is cross-built on an Apple-silicon runner and cannot run there
+        # without Rosetta, so it is built but not tested.
+        if: matrix.target != 'x86_64-apple-darwin'
+        run: cargo test --workspace --locked --release
+      - name: Build
+        shell: bash
+        run: |
+          pkgs="-p tpt-usb-rescue"
+          if [ "${{ matrix.gui }}" = "true" ]; then pkgs="$pkgs -p tpt-usb-rescue-gui"; fi
+          cargo build --release --locked --target "${{ matrix.target }}" $pkgs
+      - name: Package
+        shell: bash
+        run: |
+          name="tpt-usb-rescue-v${{ needs.check.outputs.version }}-${{ matrix.target }}"
+          out="target/${{ matrix.target }}/release"
+          mkdir -p "dist/$name"
+          ext=""
+          if [[ "${{ matrix.target }}" == *windows* ]]; then ext=".exe"; fi
+          cp "$out/tpt-usb-rescue$ext" "dist/$name/"
+          if [ "${{ matrix.gui }}" = "true" ]; then cp "$out/tpt-usb-rescue-gui$ext" "dist/$name/"; fi
+          cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cp docs/USAGE.md "dist/$name/USAGE.md"
+          cd dist
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            7z a "$name.zip" "$name" > /dev/null
+          else
+            tar czf "$name.tar.gz" "$name"
+          fi
+          rm -rf "$name"
+          ls -l
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Release notes
+        run: |
+          v="${{ needs.check.outputs.version }}"
+          # The CHANGELOG section for this version, or [Unreleased] when it was not renamed.
+          section() {
+            awk -v h="$1" 'index($0, "## [" h "]") == 1 { f = 1; next } f && /^## \[/ { exit } f { print }' CHANGELOG.md
+          }
+          section "$v" > notes.md
+          if [ ! -s notes.md ]; then section Unreleased > notes.md; fi
+          if [ ! -s notes.md ]; then echo "Release $v. See CHANGELOG.md." > notes.md; fi
+          {
+            echo
+            echo "## Verify your download"
+            echo
+            echo 'Check the file against `SHA256SUMS` (`sha256sum -c SHA256SUMS --ignore-missing`).'
+            echo "These tools read raw disks: run them as administrator or root, and only on devices you own."
+          } >> notes.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=""
+          case "$GITHUB_REF_NAME" in *-*) flags="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" --notes-file notes.md $flags

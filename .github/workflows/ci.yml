@@ -1,21 +1,71 @@
 name: CI
-on: [push, pull_request]
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# A newer push to the same branch or PR makes the older run pointless.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   test:
+    name: test (${{ matrix.os }})
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with: { components: "rustfmt, clippy" }
+      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Also runs the doc tests.
+      - run: cargo test --workspace --locked
+
+  docs:
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps --locked
+
   msrv:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85
-      - run: cargo check --workspace
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets --locked
+
+  # Licenses, bans, sources and known advisories (policy in deny.toml).
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  # The fuzz targets are not run here, only built, so they cannot rot unnoticed.
+  fuzz-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+      - uses: taiki-e/install-action@cargo-fuzz
+      - run: cargo fuzz build
