@@ -12,6 +12,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-tpt-usb-rescue.workspace = true
 tpt-usb-rescue-hal.workspace = true
 tpt-usb-rescue-imager.workspace = true
+
+# Only the Windows UI (`src/ui.rs`) uses the CLI operations crate; on other platforms the GUI
+# just prints a message, so the dependency is not pulled in there.
+[target.'cfg(windows)'.dependencies]
+tpt-usb-rescue.workspace = true
