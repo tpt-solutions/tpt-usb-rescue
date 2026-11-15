@@ -126,6 +126,7 @@ impl<'a> Fat32<'a> {
             return;
         }
         let dir = self.dir_bytes(first);
+        // Long-name pieces in directory order, each with the checksum it carries.
         let mut lfn: Vec<(u8, Vec<u16>)> = Vec::new();
         for raw in dir.chunks_exact(32) {
             if raw[0] == 0x00 {
@@ -134,14 +135,13 @@ impl<'a> Fat32<'a> {
             let deleted = raw[0] == 0xE5;
             if raw[11] == 0x0F {
                 // Long-file-name piece: 13 UTF-16 code units spread over three fields.
-                let seq = raw[0] & 0x1F;
                 let mut units = Vec::with_capacity(13);
                 for range in [1..11usize, 14..26, 28..32] {
                     for pair in raw[range].chunks_exact(2) {
                         units.push(u16::from_le_bytes([pair[0], pair[1]]));
                     }
                 }
-                lfn.push((seq, units));
+                lfn.push((raw[13], units));
                 continue;
             }
             if raw[11] & 0x08 != 0 {
@@ -149,17 +149,28 @@ impl<'a> Fat32<'a> {
                 continue;
             }
             let short = short_name(raw, deleted);
+            // The pieces are stored last-first, so reading them back-to-front gives the name.
+            // (A deleted piece loses its sequence byte, so the order cannot be sorted by it.)
+            // A live entry's pieces must carry the checksum of its short name, otherwise they are
+            // leftovers of another file. A deleted entry's first character is gone, so its
+            // checksum cannot be checked.
             let name = if lfn.is_empty() {
                 short
             } else {
-                lfn.sort_by_key(|(seq, _)| *seq);
+                let sum = lfn_checksum(&raw[0..11]);
+                let genuine = deleted || lfn.iter().all(|(c, _)| *c == sum);
                 let units: Vec<u16> = lfn
                     .iter()
+                    .rev()
                     .flat_map(|(_, u)| u.iter().copied())
                     .take_while(|u| *u != 0x0000 && *u != 0xFFFF)
                     .collect();
                 lfn.clear();
-                String::from_utf16_lossy(&units)
+                if genuine && !units.is_empty() {
+                    String::from_utf16_lossy(&units)
+                } else {
+                    short
+                }
             };
             if !deleted && (name == "." || name == "..") {
                 continue;
@@ -183,6 +194,13 @@ impl<'a> Fat32<'a> {
             }
         }
     }
+}
+
+/// The checksum that long-name pieces store for their short name (the 11 raw bytes).
+fn lfn_checksum(short: &[u8]) -> u8 {
+    short
+        .iter()
+        .fold(0u8, |sum, &b| sum.rotate_right(1).wrapping_add(b))
 }
 
 fn short_name(raw: &[u8], deleted: bool) -> String {
@@ -321,7 +339,7 @@ pub(crate) mod test_image {
         img
     }
 
-    fn short(name: &[u8; 8], ext: &[u8], attr: u8, first: u32, size: u32) -> [u8; 32] {
+    pub(super) fn short(name: &[u8; 8], ext: &[u8], attr: u8, first: u32, size: u32) -> [u8; 32] {
         let mut e = [b' '; 32];
         e[0..8].copy_from_slice(name);
         e[8..8 + ext.len()].copy_from_slice(ext);
@@ -332,7 +350,7 @@ pub(crate) mod test_image {
         e
     }
 
-    fn short_checksum(name: &[u8; 8], ext: &[u8]) -> u8 {
+    pub(super) fn short_checksum(name: &[u8; 8], ext: &[u8]) -> u8 {
         let mut sn = [b' '; 11];
         sn[..8].copy_from_slice(name);
         sn[8..8 + ext.len()].copy_from_slice(ext);
@@ -340,25 +358,33 @@ pub(crate) mod test_image {
             .fold(0u8, |sum, &b| sum.rotate_right(1).wrapping_add(b))
     }
 
-    /// Builds LFN entries (highest sequence first) for a name of at most 13 characters.
-    fn lfn(name: &str, checksum: u8) -> Vec<[u8; 32]> {
+    /// Builds LFN entries, highest sequence first, for a name of any length.
+    pub(super) fn lfn(name: &str, checksum: u8) -> Vec<[u8; 32]> {
         let mut units: Vec<u16> = name.encode_utf16().collect();
         units.push(0);
-        while units.len() < 13 {
+        while units.len() % 13 != 0 {
             units.push(0xFFFF);
         }
-        let mut e = [0xFFu8; 32];
-        e[0] = 0x41; // last + sequence 1
-        e[11] = 0x0F;
-        e[13] = checksum;
+        let pieces = units.len() / 13;
         let positions = [1usize, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30];
-        for (i, &p) in positions.iter().enumerate() {
-            e[p..p + 2].copy_from_slice(&units[i].to_le_bytes());
+        let mut out = Vec::new();
+        for k in (1..=pieces).rev() {
+            let mut e = [0xFFu8; 32];
+            e[0] = k as u8 | if k == pieces { 0x40 } else { 0 };
+            e[11] = 0x0F;
+            e[12] = 0;
+            e[13] = checksum;
+            e[26] = 0;
+            e[27] = 0;
+            for (i, &p) in positions.iter().enumerate() {
+                e[p..p + 2].copy_from_slice(&units[(k - 1) * 13 + i].to_le_bytes());
+            }
+            out.push(e);
         }
-        vec![e]
+        out
     }
 
-    fn write_entries(img: &mut [u8], at: usize, ents: &[[u8; 32]]) {
+    pub(super) fn write_entries(img: &mut [u8], at: usize, ents: &[[u8; 32]]) {
         for (i, e) in ents.iter().enumerate() {
             img[at + i * 32..at + i * 32 + 32].copy_from_slice(e);
         }
@@ -389,6 +415,75 @@ mod tests {
             .find(|e| e.path.ends_with("ECRET.DAT"))
             .expect("deleted entry");
         assert!(secret.deleted && secret.contiguous);
+    }
+
+    /// Replaces the DOCS directory (cluster 7) with `ents` and returns the paths inside it.
+    fn docs_after(ents: &[[u8; 32]]) -> Vec<String> {
+        use crate::fat32::test_image::write_entries;
+        let mut img = build();
+        let docs = (33 + (7 - 2)) * 512;
+        img[docs..docs + 512].fill(0);
+        write_entries(&mut img, docs, ents);
+        fs_of(&img)
+            .entries()
+            .into_iter()
+            .map(|e| e.path)
+            .filter(|p| p.starts_with("/DOCS/"))
+            .collect()
+    }
+
+    #[test]
+    fn backup_boot_sector_is_not_a_second_volume() {
+        let mut img = build();
+        // BPB_BkBootSec (offset 50) says the backup lives in sector 6.
+        img[50..52].copy_from_slice(&6u16.to_le_bytes());
+        let boot = img[..512].to_vec();
+        img[6 * 512..7 * 512].copy_from_slice(&boot);
+        let found = crate::detect(&img);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].offset, 0);
+
+        // Without the pointer the copy is indistinguishable from a real volume, so it is kept:
+        // the dedupe only hides what the boot sector itself says is a backup.
+        img[50..52].copy_from_slice(&0u16.to_le_bytes());
+        img[6 * 512 + 50..6 * 512 + 52].copy_from_slice(&0u16.to_le_bytes());
+        assert_eq!(crate::detect(&img).len(), 2);
+    }
+
+    #[test]
+    fn multi_piece_long_name_is_assembled_in_order() {
+        use crate::fat32::test_image::{lfn, short, short_checksum};
+        let name = "twenty-six-char-name.txt"; // two pieces
+        let sum = short_checksum(b"TWENTY~1", b"TXT");
+        let mut ents = lfn(name, sum);
+        ents.push(short(b"TWENTY~1", b"TXT", 0x20, 8, 4));
+        assert_eq!(docs_after(&ents), vec![format!("/DOCS/{name}")]);
+    }
+
+    #[test]
+    fn deleted_multi_piece_name_keeps_its_order() {
+        use crate::fat32::test_image::{lfn, short, short_checksum};
+        let name = "twenty-six-char-name.txt";
+        let sum = short_checksum(b"TWENTY~1", b"TXT");
+        // Deleting marks every piece and the short entry with 0xE5, which also erases the
+        // sequence numbers that live pieces are ordered by.
+        let mut ents = lfn(name, sum);
+        ents.push(short(b"TWENTY~1", b"TXT", 0x20, 8, 4));
+        for e in &mut ents {
+            e[0] = 0xE5;
+        }
+        assert_eq!(docs_after(&ents), vec![format!("/DOCS/{name}")]);
+    }
+
+    #[test]
+    fn orphaned_long_name_does_not_rename_another_file() {
+        use crate::fat32::test_image::{lfn, short, short_checksum};
+        // The pieces carry the checksum of a different short name: they belong to a file that
+        // was removed, so the live entry that follows must keep its own short name.
+        let stale = short_checksum(b"OTHER~1 ", b"TXT");
+        let mut ents = lfn("someone-elses-name.txt", stale);
+        ents.push(short(b"README  ", b"TXT", 0x20, 8, 4));
+        assert_eq!(docs_after(&ents), vec!["/DOCS/README.TXT".to_string()]);
     }
 
     #[test]
